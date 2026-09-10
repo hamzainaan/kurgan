@@ -71,6 +71,7 @@ namespace
     thread_local int seldepth = 0;
     thread_local int workerId = 0;
     thread_local int currentMultiPV = 1;
+    thread_local bool inNullVerification = false;
     thread_local std::vector<Move> excludedRootMoves;
     thread_local Move killers[2][MAX_PLY];
     thread_local int history[COLOR_NB][SQUARE_NB][SQUARE_NB];
@@ -492,6 +493,60 @@ namespace
 
         if (depth <= 0)
             return quiescence(pos, alpha, beta, ply);
+
+        // --- Null Move Pruning ---
+        // Skip in PV nodes, shallow nodes, pawn-only endings (zugzwang risk),
+        // and when in check. Only try a null move when the static eval already
+        // fails high; otherwise it rarely produces a cutoff.
+        const Bitboard nonPawn = pos.byType[KNIGHT] | pos.byType[BISHOP] |
+                                 pos.byType[ROOK] | pos.byType[QUEEN];
+
+        if (!pvNode && !inNullVerification && depth >= 3 && (nonPawn & pos.byColor[us]))
+        {
+            const Square ksq = kingSquare(pos, us);
+            const bool inCheck = ksq != SQ_NONE &&
+                                 movegen::squareAttacked(pos, ksq, static_cast<Color>(us ^ 1));
+
+            if (!inCheck)
+            {
+                const int staticEval = evaluate::evaluate(pos);
+
+                if (staticEval >= beta)
+                {
+                    // Dynamic null move reduction: deeper nodes and a larger
+                    // eval margin above beta allow a more aggressive reduction.
+                    int R = 3 + depth / 4 + std::min(2, (staticEval - beta) / 200);
+                    R = std::min(R, depth - 1);
+
+                    // Null move search.
+                    pos.do_null_move();
+                    const int nullScore = -alphaBeta(pos, depth - 1 - R, -beta, -beta + 1, ply + 1, false);
+                    pos.undo_null_move();
+
+                    if (nullScore >= beta)
+                    {
+                        // Do not trust mate scores produced by a null move.
+                        const int cutoffScore = nullScore >= MATE_THRESHOLD ? beta : nullScore;
+
+                        // Verification search at deep nodes to guard against
+                        // zugzwang-induced false cutoffs.
+                        if (depth >= 12)
+                        {
+                            inNullVerification = true;
+                            const int verify = alphaBeta(pos, depth - R, beta - 1, beta, ply, false);
+                            inNullVerification = false;
+
+                            if (verify >= beta)
+                                return cutoffScore;
+                        }
+                        else
+                        {
+                            return cutoffScore;
+                        }
+                    }
+                }
+            }
+        }
 
         MoveList list;
         movegen::generate_pseudo_legal_moves(pos, list);

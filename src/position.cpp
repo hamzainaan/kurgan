@@ -359,6 +359,39 @@ void Position::undo_move(Move move)
     putPiece(undo.movedPiece, from);
 }
 
+void Position::do_null_move()
+{
+    initZobrist();
+
+    // Save state for unmake.
+    UndoInfo &undo = undoStack[undoCount++];
+    undo.prevEnPassantSquare = enPassantSquare;
+    undo.prevHalfmoveClock = halfmoveClock;
+    undo.prevHistoryCount = historyCount;
+    undo.prevHistoryStart = historyStart;
+
+    enPassantSquare = SQ_NONE;
+    ++halfmoveClock;
+    sideToMove = static_cast<Color>(sideToMove ^ 1);
+
+    // Hash: flip side and clear the en passant square.
+    zobristKey ^= sideKey ^ epKey(undo.prevEnPassantSquare);
+}
+
+void Position::undo_null_move()
+{
+    UndoInfo &undo = undoStack[--undoCount];
+
+    sideToMove = static_cast<Color>(sideToMove ^ 1);
+    enPassantSquare = undo.prevEnPassantSquare;
+    halfmoveClock = undo.prevHalfmoveClock;
+    historyCount = undo.prevHistoryCount;
+    historyStart = undo.prevHistoryStart;
+
+    // Hash: flip side back and restore the en passant square.
+    zobristKey ^= sideKey ^ epKey(enPassantSquare);
+}
+
 bool Position::isRepetition(int ply) const
 {
     const uint64_t key = zobristKey;

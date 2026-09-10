@@ -48,6 +48,10 @@ public:
     // Unmake the last move made by do_move.
     void undo_move(Move move);
 
+    // Make/unmake a null move (pass the turn without moving a piece).
+    void do_null_move();
+    void undo_null_move();
+
     // True if the current position repeats on the path; 'ply' is the current
     // search ply (0 at the root) used to distinguish game and search history.
     bool isRepetition(int ply) const;
