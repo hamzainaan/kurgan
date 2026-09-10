@@ -1,6 +1,7 @@
 #include "search.h"
 
 #include "evaluate.h"
+#include "see.h"
 
 #include <algorithm>
 #include <chrono>
@@ -29,6 +30,7 @@ namespace
     constexpr int FUTILITY_MARGIN = 120;     // per-ply child-node futility margin
     constexpr int MOVE_FUTILITY_DEPTH = 4;   // move-level futility depth limit
     constexpr int MOVE_FUTILITY_MARGIN = 90; // per-ply move-level futility margin
+    constexpr int SEE_QUIET_DEPTH = 6;       // depth limit for SEE-based quiet pruning
 
     // Transposition table bounds.
     constexpr int BOUND_NONE = 0;
@@ -170,12 +172,6 @@ namespace
         }
 
         return false;
-    }
-
-    int pieceValue(PieceType pt)
-    {
-        static constexpr int value[PIECE_TYPE_NB] = {100, 320, 330, 500, 900, 20000, 0, 0};
-        return value[pt];
     }
 
     int scoreFromTT(int s, int ply)
@@ -589,6 +585,11 @@ namespace
                 legalMoves >= 1 && staticEval + MOVE_FUTILITY_MARGIN * depth <= alpha)
                 continue;
 
+            // SEE-Based Quiet Pruning: skip quiet moves that hang material.
+            if (!pvNode && !inCheck && quiet && depth <= SEE_QUIET_DEPTH &&
+                see::evaluate(pos, m) < 0)
+                continue;
+
             if (ply == 0 && (!inSearchMoves(m) || isExcludedRootMove(m)))
                 continue;
 
@@ -725,6 +726,11 @@ namespace
         for (int i = 0; i < count; ++i)
         {
             const Move m = scored[i].move;
+
+            // SEE-Based Capture Pruning: skip losing exchanges when not in check.
+            if (!inCheck && see::evaluate(pos, m) < 0)
+                continue;
+
             if (!pos.do_move(m))
                 continue;
 

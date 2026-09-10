@@ -161,3 +161,10 @@ enum Direction : int
     SOUTH_EAST = -7,
     SOUTH_WEST = -9
 };
+
+// Material values in centipawns, indexed by PieceType.
+constexpr int pieceValue(PieceType pt)
+{
+    constexpr int value[PIECE_TYPE_NB] = {100, 320, 330, 500, 900, 20000, 0, 0};
+    return value[pt];
+}
