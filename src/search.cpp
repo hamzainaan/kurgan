@@ -22,6 +22,14 @@ namespace
     constexpr int MAX_PLY = 128;
     constexpr int MAX_DEPTH = 64;
 
+    // Futility pruning tuning (depth-dependent margins).
+    constexpr int RFP_DEPTH = 7;             // reverse (parent-node) futility depth limit
+    constexpr int RFP_MARGIN = 80;           // per-ply reverse futility margin
+    constexpr int FUTILITY_DEPTH = 1;        // child-node futility depth limit
+    constexpr int FUTILITY_MARGIN = 120;     // per-ply child-node futility margin
+    constexpr int MOVE_FUTILITY_DEPTH = 4;   // move-level futility depth limit
+    constexpr int MOVE_FUTILITY_MARGIN = 90; // per-ply move-level futility margin
+
     // Transposition table bounds.
     constexpr int BOUND_NONE = 0;
     constexpr int BOUND_EXACT = 1;
@@ -494,6 +502,28 @@ namespace
         if (depth <= 0)
             return quiescence(pos, alpha, beta, ply);
 
+        const Square ksq = kingSquare(pos, us);
+        const bool inCheck = ksq != SQ_NONE &&
+                             movegen::squareAttacked(pos, ksq, static_cast<Color>(us ^ 1));
+
+        // Static evaluation drives the pruning decisions below (non-PV only).
+        int staticEval = 0;
+        if (!pvNode)
+        {
+            staticEval = evaluate::evaluate(pos);
+
+            // Reverse Futility Pruning (parent-node futility): if the static
+            // eval is so far above beta that a shallow search cannot drop
+            // below it, return immediately.
+            if (!inCheck && depth <= RFP_DEPTH && staticEval - RFP_MARGIN * depth >= beta)
+                return staticEval;
+
+            // Child-Node Futility Pruning: at pre-frontier nodes a quiet
+            // position whose eval cannot reach alpha returns immediately.
+            if (!inCheck && depth <= FUTILITY_DEPTH && staticEval + FUTILITY_MARGIN * depth <= alpha)
+                return staticEval;
+        }
+
         // --- Null Move Pruning ---
         // Skip in PV nodes, shallow nodes, pawn-only endings (zugzwang risk),
         // and when in check. Only try a null move when the static eval already
@@ -501,49 +531,37 @@ namespace
         const Bitboard nonPawn = pos.byType[KNIGHT] | pos.byType[BISHOP] |
                                  pos.byType[ROOK] | pos.byType[QUEEN];
 
-        if (!pvNode && !inNullVerification && depth >= 3 && (nonPawn & pos.byColor[us]))
+        if (!pvNode && !inNullVerification && !inCheck && depth >= 3 && (nonPawn & pos.byColor[us]) && staticEval >= beta)
         {
-            const Square ksq = kingSquare(pos, us);
-            const bool inCheck = ksq != SQ_NONE &&
-                                 movegen::squareAttacked(pos, ksq, static_cast<Color>(us ^ 1));
+            // Dynamic null move reduction: deeper nodes and a larger eval
+            // margin above beta allow a more aggressive reduction.
+            int R = 3 + depth / 4 + std::min(2, (staticEval - beta) / 200);
+            R = std::min(R, depth - 1);
 
-            if (!inCheck)
+            // Null move search.
+            pos.do_null_move();
+            const int nullScore = -alphaBeta(pos, depth - 1 - R, -beta, -beta + 1, ply + 1, false);
+            pos.undo_null_move();
+
+            if (nullScore >= beta)
             {
-                const int staticEval = evaluate::evaluate(pos);
+                // Do not trust mate scores produced by a null move.
+                const int cutoffScore = nullScore >= MATE_THRESHOLD ? beta : nullScore;
 
-                if (staticEval >= beta)
+                // Verification search at deep nodes to guard against
+                // zugzwang-induced false cutoffs.
+                if (depth >= 12)
                 {
-                    // Dynamic null move reduction: deeper nodes and a larger
-                    // eval margin above beta allow a more aggressive reduction.
-                    int R = 3 + depth / 4 + std::min(2, (staticEval - beta) / 200);
-                    R = std::min(R, depth - 1);
+                    inNullVerification = true;
+                    const int verify = alphaBeta(pos, depth - R, beta - 1, beta, ply, false);
+                    inNullVerification = false;
 
-                    // Null move search.
-                    pos.do_null_move();
-                    const int nullScore = -alphaBeta(pos, depth - 1 - R, -beta, -beta + 1, ply + 1, false);
-                    pos.undo_null_move();
-
-                    if (nullScore >= beta)
-                    {
-                        // Do not trust mate scores produced by a null move.
-                        const int cutoffScore = nullScore >= MATE_THRESHOLD ? beta : nullScore;
-
-                        // Verification search at deep nodes to guard against
-                        // zugzwang-induced false cutoffs.
-                        if (depth >= 12)
-                        {
-                            inNullVerification = true;
-                            const int verify = alphaBeta(pos, depth - R, beta - 1, beta, ply, false);
-                            inNullVerification = false;
-
-                            if (verify >= beta)
-                                return cutoffScore;
-                        }
-                        else
-                        {
-                            return cutoffScore;
-                        }
-                    }
+                    if (verify >= beta)
+                        return cutoffScore;
+                }
+                else
+                {
+                    return cutoffScore;
                 }
             }
         }
@@ -564,6 +582,12 @@ namespace
         {
             const Move m = scored[i].move;
             const bool quiet = !m.isPromotion() && !m.isEnPassant() && !m.isCastling() && pos.board[m.to()] == NO_PIECE;
+
+            // Move-Level Futility Pruning: skip quiet moves that cannot raise
+            // alpha even with a generous positional gain.
+            if (!pvNode && !inCheck && quiet && depth <= MOVE_FUTILITY_DEPTH &&
+                legalMoves >= 1 && staticEval + MOVE_FUTILITY_MARGIN * depth <= alpha)
+                continue;
 
             if (ply == 0 && (!inSearchMoves(m) || isExcludedRootMove(m)))
                 continue;
@@ -636,8 +660,6 @@ namespace
 
         if (legalMoves == 0)
         {
-            const Square ksq = kingSquare(pos, us);
-            const bool inCheck = ksq != SQ_NONE && movegen::squareAttacked(pos, ksq, static_cast<Color>(us ^ 1));
             const int score = inCheck ? -MATE + ply : 0;
             ttStore(key, Move(), score, depth, BOUND_EXACT, ply);
             return score;
