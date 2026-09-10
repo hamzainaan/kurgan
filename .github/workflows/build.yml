@@ -56,7 +56,7 @@ jobs:
           cp kurgan "kurgan-linux-${{ matrix.arch }}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: kurgan-linux-${{ matrix.arch }}
           path: kurgan-linux-${{ matrix.arch }}
@@ -98,10 +98,11 @@ jobs:
 
       - name: Build
         env:
-          CXXFLAGS: -march=${{ matrix.march }}
+          CXX: x86_64-w64-mingw32-g++
+          CXXFLAGS: -static -march=${{ matrix.march }}
         run: |
           make clean
-          make MODE=${BUILD_MODE} NATIVE= CXXFLAGS="${CXXFLAGS}"
+          make MODE=${BUILD_MODE} NATIVE= CXX="${CXX}" CXXFLAGS="${CXXFLAGS}"
 
       - name: Verify
         run: |
@@ -113,7 +114,7 @@ jobs:
           cp kurgan.exe "kurgan-windows-${{ matrix.arch }}.exe"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: kurgan-windows-${{ matrix.arch }}
           path: kurgan-windows-${{ matrix.arch }}.exe
@@ -173,7 +174,7 @@ jobs:
           cp kurgan "kurgan-android-${{ matrix.abi }}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: kurgan-android-${{ matrix.abi }}
           path: kurgan-android-${{ matrix.abi }}
