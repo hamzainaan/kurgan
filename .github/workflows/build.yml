@@ -1,0 +1,180 @@
+name: Build Kurgan
+
+on:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BUILD_MODE: release
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86-64
+            march: x86-64
+          - arch: x86-64-v2
+            march: x86-64-v2
+          - arch: x86-64-v3
+            march: x86-64-v3
+          - arch: x86-64-v4
+            march: x86-64-v4
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ make
+
+      - name: Build
+        env:
+          CXXFLAGS: -march=${{ matrix.march }}
+        run: |
+          make clean
+          make MODE=${BUILD_MODE} NATIVE= CXXFLAGS="${CXXFLAGS}"
+
+      - name: Verify
+        run: |
+          test -x kurgan
+          file kurgan
+
+      - name: Rename artifact
+        run: |
+          cp kurgan "kurgan-linux-${{ matrix.arch }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kurgan-linux-${{ matrix.arch }}
+          path: kurgan-linux-${{ matrix.arch }}
+          if-no-files-found: error
+
+  windows:
+    name: Windows ${{ matrix.arch }}
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86-64
+            march: x86-64
+          - arch: x86-64-v2
+            march: x86-64-v2
+          - arch: x86-64-v3
+            march: x86-64-v3
+          - arch: x86-64-v4
+            march: x86-64-v4
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup MSYS2 UCRT64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make
+            mingw-w64-ucrt-x86_64-gcc
+
+      - name: Build
+        env:
+          CXXFLAGS: -march=${{ matrix.march }}
+        run: |
+          make clean
+          make MODE=${BUILD_MODE} NATIVE= CXXFLAGS="${CXXFLAGS}"
+
+      - name: Verify
+        run: |
+          test -f kurgan.exe
+          file kurgan.exe
+
+      - name: Rename artifact
+        run: |
+          cp kurgan.exe "kurgan-windows-${{ matrix.arch }}.exe"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kurgan-windows-${{ matrix.arch }}
+          path: kurgan-windows-${{ matrix.arch }}.exe
+          if-no-files-found: error
+
+  android:
+    name: Android ${{ matrix.abi }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            target: aarch64-linux-android
+            api: 24
+
+          - abi: armeabi-v7a
+            target: armv7a-linux-androideabi
+            api: 24
+
+          - abi: x86_64
+            target: x86_64-linux-android
+            api: 24
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager "ndk;29.0.14206865"
+
+      - name: Build
+        env:
+          ANDROID_NDK_VERSION: 29.0.14206865
+          ANDROID_API: ${{ matrix.api }}
+          ANDROID_TARGET: ${{ matrix.target }}
+        run: |
+          TOOLCHAIN="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64"
+          export CXX="$TOOLCHAIN/bin/clang++"
+          export CXXFLAGS="--target=${ANDROID_TARGET}${ANDROID_API}"
+
+          make clean
+          make MODE=${BUILD_MODE} NATIVE= CXX="$CXX" CXXFLAGS="$CXXFLAGS"
+
+      - name: Verify
+        run: |
+          test -f kurgan
+          file kurgan
+
+      - name: Rename artifact
+        run: |
+          cp kurgan "kurgan-android-${{ matrix.abi }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kurgan-android-${{ matrix.abi }}
+          path: kurgan-android-${{ matrix.abi }}
+          if-no-files-found: error
