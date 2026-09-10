@@ -1,3 +1,4 @@
+```yaml
 name: Build Kurgan
 
 on:
@@ -48,12 +49,12 @@ jobs:
 
       - name: Verify
         run: |
-          test -x build/kurgan
-          file build/kurgan
+          test -x kurgan
+          file kurgan
 
       - name: Rename artifact
         run: |
-          cp build/kurgan "kurgan-linux-${{ matrix.arch }}"
+          cp kurgan "kurgan-linux-${{ matrix.arch }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -105,12 +106,12 @@ jobs:
 
       - name: Verify
         run: |
-          test -f build/kurgan.exe
-          file build/kurgan.exe
+          test -f kurgan.exe
+          file kurgan.exe
 
       - name: Rename artifact
         run: |
-          cp build/kurgan.exe "kurgan-windows-${{ matrix.arch }}.exe"
+          cp kurgan.exe "kurgan-windows-${{ matrix.arch }}.exe"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -165,12 +166,12 @@ jobs:
 
       - name: Verify
         run: |
-          test -f build/kurgan
-          file build/kurgan
+          test -f kurgan
+          file kurgan
 
       - name: Rename artifact
         run: |
-          cp build/kurgan "kurgan-android-${{ matrix.abi }}"
+          cp kurgan "kurgan-android-${{ matrix.abi }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -178,3 +179,4 @@ jobs:
           name: kurgan-android-${{ matrix.abi }}
           path: kurgan-android-${{ matrix.abi }}
           if-no-files-found: error
+```
