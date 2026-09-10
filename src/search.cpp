@@ -617,6 +617,9 @@ namespace
         if (ply > seldepth)
             seldepth = ply;
 
+        // Let the parent copy a valid principal variation back up.
+        pvLength[ply] = ply;
+
         const Color us = pos.sideToMove;
         const Color them = static_cast<Color>(us ^ 1);
         const Square ksq = kingSquare(pos, us);
