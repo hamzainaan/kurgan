@@ -47,6 +47,7 @@ namespace
     std::atomic<bool> bestmoveEmitted{false};
     std::atomic<uint64_t> globalNodes{0};
     std::atomic<uint64_t> ttWrites{0};
+    std::atomic<uint64_t> ttFilled{0};
     std::atomic<uint64_t> searchedNodes{0};
 
     std::chrono::steady_clock::time_point deadline;
@@ -181,6 +182,8 @@ namespace
     void ttStore(uint64_t key, Move move, int score, int depth, int bound, int ply)
     {
         TTEntry &e = tt[key & ttMask];
+        if (e.key == 0)
+            ttFilled.fetch_add(1, std::memory_order_relaxed);
         e.key = key;
         e.move = move;
         e.score = static_cast<int16_t>(scoreToTT(score, ply));
@@ -250,6 +253,7 @@ namespace
     {
         std::fill(tt.begin(), tt.end(), TTEntry{});
         ttWrites.store(0, std::memory_order_relaxed);
+        ttFilled.store(0, std::memory_order_relaxed);
     }
 
     void ttResize(size_t megabytes)
@@ -362,7 +366,9 @@ namespace
         std::cout << " nodes " << nodeCount;
         if (elapsedMs > 0)
             std::cout << " nps " << (nodeCount * 1000 / elapsedMs);
-        std::cout << " hashfull " << (ttWrites.load(std::memory_order_relaxed) * 1000 / (tt.empty() ? 1 : tt.size()));
+        const uint64_t filled = ttFilled.load(std::memory_order_relaxed);
+        const int permille = tt.empty() ? 0 : static_cast<int>(std::min<uint64_t>(1000, filled * 1000 / tt.size()));
+        std::cout << " hashfull " << permille;
         std::cout << " time " << elapsedMs;
 
         std::cout << " pv";
@@ -371,7 +377,71 @@ namespace
         std::cout << std::endl;
     }
 
+    // Emit up to 'depth' root moves in a single line (worker 0 only).
+    // Called once per depth instead of printing a currmove line per move
+    // during the search, which costs nps.
+    void printRootMoves(const Position &pos, int depth)
+    {
+        MoveList list;
+        movegen::generate_pseudo_legal_moves(pos, list);
+
+        ScoredMove scored[MoveList::MAX_MOVES];
+        int count = 0;
+        orderMoves(pos, list, scored, count, Move(), 0, false);
+
+        const int limit = std::min(count, depth);
+
+        std::lock_guard<std::mutex> lock(outputMutex);
+        std::cout << "info depth " << depth;
+        for (int i = 0; i < limit; ++i)
+            std::cout << " currmove " << moveToUci(scored[i].move);
+        std::cout << std::endl;
+    }
+
     int quiescence(Position &pos, int alpha, int beta, int ply);
+
+    // Integer floor(log2(n)) for n >= 1.
+    int log2Floor(int n)
+    {
+        int r = 0;
+        while (n > 1)
+        {
+            n >>= 1;
+            ++r;
+        }
+        return r;
+    }
+
+    // Late Move Reduction.
+    //
+    // Components:
+    //  - Move-Count-Based LMR: reduction grows with the move index (logarithmic).
+    //  - Dynamic LMR:          reduction grows with depth (logarithmic).
+    //  - PV / Non-PV LMR:      PV nodes are reduced less.
+    //  - CutNode LMR:          non-PV (cut) nodes are reduced more.
+    //  - History-Based LMR:    better history score -> less reduction.
+    int lmrReduction(bool pvNode, int depth, int moveCount, int historyScore)
+    {
+        if (moveCount <= 1 || depth < 3)
+            return 0;
+
+        // Base: depth and move count scale the reduction.
+        int r = (log2Floor(depth) * log2Floor(moveCount)) / 2;
+
+        // PV nodes search the principal variation: reduce less.
+        if (pvNode)
+            r -= 1;
+        else if (moveCount > 6)
+            r += 1; // Cut node: expect a beta cutoff, reduce more.
+
+        // Good history -> the move is promising, reduce less.
+        if (historyScore < 0)
+            r += 1;
+        else if (historyScore > 2048)
+            r -= 1;
+
+        return std::clamp(r, 0, depth - 1);
+    }
 
     int alphaBeta(Position &pos, int depth, int alpha, int beta, int ply, bool pvNode)
     {
@@ -443,13 +513,6 @@ namespace
             if (ply == 0 && (!inSearchMoves(m) || isExcludedRootMove(m)))
                 continue;
 
-            if (ply == 0 && workerId == 0 && currentMultiPV == 1)
-            {
-                std::lock_guard<std::mutex> lock(outputMutex);
-                std::cout << "info depth " << depth << " currmove " << moveToUci(m)
-                          << " currmovenumber " << (i + 1) << std::endl;
-            }
-
             if (!pos.do_move(m))
                 continue;
 
@@ -457,10 +520,26 @@ namespace
 
             int score;
             if (legalMoves == 1)
+            {
+                // TT move (or first legal move): full depth and full window.
                 score = -alphaBeta(pos, depth - 1, -beta, -alpha, ply + 1, pvNode);
+            }
             else
             {
-                score = -alphaBeta(pos, depth - 1, -alpha - 1, -alpha, ply + 1, false);
+                // Late Move Reduction: reduce late, quiet moves.
+                int r = 0;
+                if (quiet)
+                    r = lmrReduction(pvNode, depth, legalMoves, history[us][m.from()][m.to()]);
+
+                const int newDepth = std::max(0, depth - 1 - r);
+
+                // Reduced-depth null-window search.
+                score = -alphaBeta(pos, newDepth, -alpha - 1, -alpha, ply + 1, false);
+
+                // LMR re-search: verify at full depth if the reduced search beat alpha.
+                if (r > 0 && score > alpha)
+                    score = -alphaBeta(pos, depth - 1, -alpha - 1, -alpha, ply + 1, false);
+
                 if (score > alpha && score < beta)
                     score = -alphaBeta(pos, depth - 1, -beta, -alpha, ply + 1, true);
             }
@@ -586,6 +665,51 @@ namespace
         return alpha;
     }
 
+    // Search the root at the given depth, re-searching with a widening
+    // aspiration window around prevScore on fail-low/fail-high.
+    int aspirationSearch(Position &pos, int depth, int prevScore)
+    {
+        constexpr int INITIAL_DELTA = 16;
+        constexpr int ASPIRATION_MIN_DEPTH = 4;
+
+        int delta = INITIAL_DELTA;
+        int alpha = -INF;
+        int beta = INF;
+
+        // Only start with a narrow window for stable, non-mate scores.
+        if (depth >= ASPIRATION_MIN_DEPTH && prevScore > -MATE_THRESHOLD && prevScore < MATE_THRESHOLD)
+        {
+            alpha = std::max(-INF, prevScore - delta);
+            beta = std::min(INF, prevScore + delta);
+        }
+
+        while (true)
+        {
+            const int score = alphaBeta(pos, depth, alpha, beta, 0, true);
+
+            if (stopFlag.load(std::memory_order_relaxed))
+                return score;
+
+            if (score <= alpha)
+            {
+                // Fail-low: lower alpha and tighten beta toward the true value.
+                beta = (alpha + beta) / 2;
+                alpha = std::max(-INF, score - delta);
+            }
+            else if (score >= beta)
+            {
+                // Fail-high: raise beta.
+                beta = std::min(INF, score + delta);
+            }
+            else
+            {
+                return score;
+            }
+
+            delta += delta / 2;
+        }
+    }
+
     void iterativeDeepening(Position &pos)
     {
         nodes = 0;
@@ -597,20 +721,29 @@ namespace
         excludedRootMoves.clear();
 
         const auto start = std::chrono::steady_clock::now();
+        int previousScore = 0;
 
         for (int depth = 1; depth <= maxDepth; ++depth)
         {
             const int mpvCount = workerId == 0 ? multiPVSetting : 1;
             excludedRootMoves.clear();
 
+            if (workerId == 0 && depth >= 12)
+                printRootMoves(pos, depth);
+
             for (int mpv = 1; mpv <= mpvCount; ++mpv)
             {
                 currentMultiPV = mpv;
                 seldepth = 0;
-                const int score = alphaBeta(pos, depth, -INF, INF, 0, true);
+                const int score = (mpv == 1)
+                                      ? aspirationSearch(pos, depth, previousScore)
+                                      : alphaBeta(pos, depth, -INF, INF, 0, true);
 
                 if (stopFlag.load(std::memory_order_relaxed))
                     break;
+
+                if (mpv == 1)
+                    previousScore = score;
 
                 const long long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                                               std::chrono::steady_clock::now() - start)
