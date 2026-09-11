@@ -50,15 +50,18 @@ namespace
     std::vector<TTEntry> tt;
     uint64_t ttMask = 0;
 
-    std::atomic<bool> stopFlag{false};
-    std::atomic<bool> searching{false};
-    std::atomic<bool> ponderFlag{false};
-    std::atomic<bool> ponderHitFlag{false};
-    std::atomic<bool> bestmoveEmitted{false};
-    std::atomic<uint64_t> globalNodes{0};
-    std::atomic<uint64_t> ttWrites{0};
-    std::atomic<uint64_t> ttFilled{0};
-    std::atomic<uint64_t> searchedNodes{0};
+    // Frequently accessed atomics are isolated on separate cache lines to
+    // avoid false sharing: without this, a thread writing to a counter would
+    // invalidate the cache line holding stopFlag (read at every node) and
+    // per-thread throughput (and reported nps) would drop as threads grow.
+    alignas(64) std::atomic<bool> stopFlag{false};
+    alignas(64) std::atomic<uint64_t> searchedNodes{0};
+    alignas(64) std::atomic<uint64_t> ttFilled{0};
+    alignas(64) std::atomic<uint64_t> globalNodes{0};
+    alignas(64) std::atomic<bool> searching{false};
+    alignas(64) std::atomic<bool> ponderFlag{false};
+    alignas(64) std::atomic<bool> ponderHitFlag{false};
+    alignas(64) std::atomic<bool> bestmoveEmitted{false};
 
     std::chrono::steady_clock::time_point deadline;
     std::chrono::steady_clock::time_point searchStart;
@@ -87,6 +90,7 @@ namespace
     thread_local int history[COLOR_NB][SQUARE_NB][SQUARE_NB];
     thread_local Move pvTable[MAX_PLY][MAX_PLY];
     thread_local int pvLength[MAX_PLY];
+    thread_local uint64_t ttFilledLocal = 0;
 
     int countrZero(Bitboard b)
     {
@@ -188,13 +192,18 @@ namespace
     {
         TTEntry &e = tt[key & ttMask];
         if (e.key == 0)
-            ttFilled.fetch_add(1, std::memory_order_relaxed);
+        {
+            // Count newly filled entries locally and flush to the shared
+            // counter only periodically: a per-store atomic RMW would
+            // serialize all threads on one cache line and tank nps.
+            if ((++ttFilledLocal & 1023) == 0)
+                ttFilled.fetch_add(1024, std::memory_order_relaxed);
+        }
         e.key = key;
         e.move = move;
         e.score = static_cast<int16_t>(scoreToTT(score, ply));
         e.depth = static_cast<int16_t>(depth);
         e.bound = static_cast<int8_t>(bound);
-        ttWrites.fetch_add(1, std::memory_order_relaxed);
     }
 
     std::string moveToUci(Move m);
@@ -222,6 +231,11 @@ namespace
 
     void checkTime()
     {
+        // Accumulate the node bucket flushed by the caller. Doing it here (and
+        // not per node) keeps writes to the shared counter infrequent, and it
+        // lets quiescence and alpha-beta nodes be counted uniformly.
+        searchedNodes.fetch_add(2048, std::memory_order_relaxed);
+
         if (stopFlag.load(std::memory_order_relaxed))
             return;
 
@@ -257,7 +271,6 @@ namespace
     void clearTT()
     {
         std::fill(tt.begin(), tt.end(), TTEntry{});
-        ttWrites.store(0, std::memory_order_relaxed);
         ttFilled.store(0, std::memory_order_relaxed);
     }
 
@@ -454,10 +467,7 @@ namespace
             return evaluate::evaluate(pos);
 
         if ((++nodes & 2047) == 0)
-        {
-            searchedNodes.fetch_add(2048, std::memory_order_relaxed);
             checkTime();
-        }
         if (stopFlag.load(std::memory_order_relaxed))
             return 0;
 
@@ -805,16 +815,18 @@ namespace
         std::memset(pvTable, 0, sizeof(pvTable));
         std::memset(pvLength, 0, sizeof(pvLength));
         excludedRootMoves.clear();
+        ttFilledLocal = 0;
 
+        const bool isMain = (workerId == 0);
         const auto start = std::chrono::steady_clock::now();
         int previousScore = 0;
 
         for (int depth = 1; depth <= maxDepth; ++depth)
         {
-            const int mpvCount = workerId == 0 ? multiPVSetting : 1;
+            const int mpvCount = isMain ? multiPVSetting : 1;
             excludedRootMoves.clear();
 
-            if (workerId == 0 && depth >= 12)
+            if (isMain && depth >= 12)
                 printRootMoves(pos, depth);
 
             for (int mpv = 1; mpv <= mpvCount; ++mpv)
@@ -831,18 +843,26 @@ namespace
                 if (mpv == 1)
                     previousScore = score;
 
-                const long long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                              std::chrono::steady_clock::now() - start)
-                                              .count();
-                printInfo(depth, score, nodes, elapsed, pvTable[0], pvLength[0], mpv);
-
-                if (mpv == 1)
+                // Only the main thread reports: helper threads search silently
+                // and contribute through the shared transposition table.
+                if (isMain)
                 {
-                    std::lock_guard<std::mutex> lock(bestMutex);
-                    if (depth > completedDepth)
+                    const long long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                  std::chrono::steady_clock::now() - start)
+                                                  .count();
+                    // Report aggregate nodes across all threads so nps scales
+                    // with the thread count instead of reflecting one worker's
+                    // share of the work.
+                    printInfo(depth, score, searchedNodes.load(std::memory_order_relaxed), elapsed, pvTable[0], pvLength[0], mpv);
+
+                    if (mpv == 1)
                     {
-                        completedDepth = depth;
-                        finalBestMove = pvTable[0][0];
+                        std::lock_guard<std::mutex> lock(bestMutex);
+                        if (depth > completedDepth)
+                        {
+                            completedDepth = depth;
+                            finalBestMove = pvTable[0][0];
+                        }
                     }
                 }
 
@@ -864,6 +884,7 @@ namespace
         }
 
         globalNodes.fetch_add(nodes, std::memory_order_relaxed);
+        ttFilled.fetch_add(ttFilledLocal, std::memory_order_relaxed);
     }
 
     void worker(Position *pos, int id)
