@@ -207,7 +207,9 @@ void uci::loop()
             std::cout << "id author Hamza Inan" << std::endl;
             std::cout << "option name Hash type spin default 16 min 1 max 65536" << std::endl;
             std::cout << "option name Threads type spin default 1 min 1 max 256" << std::endl;
+            std::cout << "option name Ponder type check default false" << std::endl;
             std::cout << "option name MultiPV type spin default 1 min 1 max 64" << std::endl;
+            std::cout << "option name Clear Hash type button" << std::endl;
             std::cout << "uciok" << std::endl;
         }
         else if (cmd == "isready")
@@ -224,12 +226,32 @@ void uci::loop()
             std::string name;
             std::string value;
             std::string token;
+            bool inName = false;
+            bool inValue = false;
             while (ss >> token)
             {
-                if (token == "name" && ss >> token)
-                    name = token;
-                else if (token == "value" && ss >> token)
-                    value = token;
+                if (token == "name")
+                {
+                    inName = true;
+                    inValue = false;
+                }
+                else if (token == "value")
+                {
+                    inName = false;
+                    inValue = true;
+                }
+                else if (inName)
+                {
+                    if (!name.empty())
+                        name += ' ';
+                    name += token;
+                }
+                else if (inValue)
+                {
+                    if (!value.empty())
+                        value += ' ';
+                    value += token;
+                }
             }
 
             joinSearch();
@@ -240,8 +262,12 @@ void uci::loop()
                     search::setHashSize(std::stoi(value));
                 else if (name == "Threads")
                     search::setThreads(std::stoi(value));
+                else if (name == "Ponder")
+                    search::setPonder(value == "true");
                 else if (name == "MultiPV")
                     search::setMultiPV(std::stoi(value));
+                else if (name == "Clear Hash")
+                    search::clear();
             }
             catch (...)
             {

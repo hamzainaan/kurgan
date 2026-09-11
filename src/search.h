@@ -47,7 +47,9 @@ namespace search
     void setHashSize(int megabytes);
     void setThreads(int count);
     void setMultiPV(int value);
+    void setPonder(bool enabled);
     int hashSize();
     int threadCount();
     int multiPV();
+    bool ponderEnabled();
 }

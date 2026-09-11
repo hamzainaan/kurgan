@@ -69,6 +69,7 @@ namespace
     int hashSizeMb = 16;
     int threadCountSetting = 0; // 0 = auto
     int multiPVSetting = 1;
+    bool ponderSetting = false;
     int64_t nodesLimit = 0;
     int mateGoal = 0;
     Color activeUs = WHITE;
@@ -918,7 +919,8 @@ void search::go(const Position &root, const SearchLimits &limits)
     activeUs = root.sideToMove;
     nodesLimit = limits.nodes;
     mateGoal = limits.mate;
-    ponderFlag.store(limits.ponder, std::memory_order_relaxed);
+    // Honor the Ponder option: never ponder unless it has been enabled.
+    ponderFlag.store(limits.ponder && ponderSetting, std::memory_order_relaxed);
     ponderHitFlag.store(false, std::memory_order_relaxed);
     bestmoveEmitted.store(false, std::memory_order_relaxed);
     stopFlag.store(false, std::memory_order_relaxed);
@@ -1029,9 +1031,19 @@ void search::setMultiPV(int value)
     multiPVSetting = value;
 }
 
+void search::setPonder(bool enabled)
+{
+    ponderSetting = enabled;
+}
+
 int search::multiPV()
 {
     return multiPVSetting;
+}
+
+bool search::ponderEnabled()
+{
+    return ponderSetting;
 }
 
 void search::ponderhit()
