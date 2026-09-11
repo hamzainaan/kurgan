@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Modern mat antrasit zemin -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#12151B" />
+      <stop offset="100%" stop-color="#08090C" />
+    </linearGradient>
+
+    <!-- Derinlik ve güç hissi veren metalik bronz/soğuk gümüş gradyan -->
+    <linearGradient id="monolithGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#EAEFF5" />
+      <stop offset="100%" stop-color="#8A95A5" />
+    </linearGradient>
+    
+    <!-- Çekirdek algoritma ışığı -->
+    <linearGradient id="coreGlow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#60A5FA" />
+      <stop offset="100%" stop-color="#2563EB" />
+    </linearGradient>
+  </defs>
+
+  <!-- Arka Plan (Opsiyonel / İkon formatı için yuvarlatılmış kare) -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGradient)" />
+
+  <g transform="translate(0, 10)">
+    <!-- 1. KURGAN TÜMÜLÜSÜ (Dış Kabuk / Heybetli Tepe) -->
+    <!-- Üst kavisli tepe formu; satranç taşının kubbesini ve kurgan tepeciğini oluşturur -->
+    <path d="M 120 340 
+             C 120 210, 190 140, 256 140 
+             C 322 140, 392 210, 392 340 
+             Z" 
+          fill="url(#monolithGrad)" />
+
+    <!-- 2. UFUK ÇİZGİSİ (Bozkır / Tahta Hattı) -->
+    <rect x="96" y="356" width="320" height="12" rx="6" fill="#8A95A5" opacity="0.4" />
+
+    <!-- 3. ŞAHIN TACI / BALBAL ZİRVESİ (Soyut Geometrik Kesik) -->
+    <!-- Şah figürünü belirginleştiren minimalist üst çentik/artı etkisi -->
+    <path d="M 256 104 L 256 126" stroke="url(#monolithGrad)" stroke-width="10" stroke-linecap="round" />
+    <circle cx="256" cy="92" r="7" fill="url(#monolithGrad)" />
+
+    <!-- 4. YERALTI ODASI VE DERİNLİK HESABI (Negatif Alan ve Ağaç Yapısı) -->
+    <!-- Tepeciğin içine oyulmuş; basamak basamak derinleşen (ply depth) arama mantığı -->
+    
+    <!-- Katman 1: En derin oda (Şahın gövdesi / Motor çekirdeği) -->
+    <path d="M 256 185 
+             L 282 230 
+             L 270 230 
+             L 286 270 
+             L 268 270 
+             L 292 320 
+             L 220 320 
+             L 244 270 
+             L 226 270 
+             L 242 230 
+             L 230 230 Z" 
+          fill="#12151B" />
+
+    <!-- Katman 2: Veri Akışı / Monolit Çekirdek (Merkez Algoritma Hattı) -->
+    <line x1="256" y1="195" x2="256" y2="305" stroke="url(#coreGlow)" stroke-width="6" stroke-linecap="round" />
+    
+    <!-- Hesaplama Düğümleri (Nodes / Mezar Hazinesi) -->
+    <circle cx="256" cy="205" r="4" fill="#60A5FA" />
+    <circle cx="256" cy="250" r="4" fill="#60A5FA" />
+    <circle cx="256" cy="295" r="5" fill="#60A5FA" />
+
+    <!-- Zemin Katman Çizgileri (Derinlik Seviyeleri) -->
+    <line x1="200" y1="340" x2="312" y2="340" stroke="#12151B" stroke-width="6" stroke-linecap="round" />
+  </g>
+</svg>
