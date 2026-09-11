@@ -63,7 +63,8 @@ namespace
     alignas(64) std::atomic<bool> ponderHitFlag{false};
     alignas(64) std::atomic<bool> bestmoveEmitted{false};
 
-    std::chrono::steady_clock::time_point deadline;
+    std::chrono::steady_clock::time_point deadline;     // hard limit: always stop here
+    std::chrono::steady_clock::time_point softDeadline; // optimum: stop early when stable
     std::chrono::steady_clock::time_point searchStart;
     int maxDepth = MAX_DEPTH;
     int hashSizeMb = 16;
@@ -209,25 +210,45 @@ namespace
 
     std::string moveToUci(Move m);
 
+    // Dynamic time management: the optimum (soft) deadline is the target for a
+    // stable search, while the maximum (hard) deadline is cut off
+    // unconditionally by checkTime(). Unstable searches spend up to the hard
+    // limit; stable ones stop at the soft limit.
     void computeDeadline(const search::SearchLimits &limits, Color us)
     {
         searchStart = std::chrono::steady_clock::now();
 
         if (limits.movetime > 0)
+        {
             deadline = searchStart + std::chrono::milliseconds(limits.movetime);
+            softDeadline = deadline;
+        }
         else if (limits.wtime > 0 || limits.btime > 0)
         {
             const int64_t myTime = us == WHITE ? limits.wtime : limits.btime;
             const int64_t myInc = us == WHITE ? limits.winc : limits.binc;
-            int64_t alloc = myTime / 20 + myInc / 2;
-            if (alloc > myTime - 50)
-                alloc = myTime - 50;
-            if (alloc < 1)
-                alloc = 1;
-            deadline = searchStart + std::chrono::milliseconds(alloc);
+
+            int64_t optimum = myTime / 20 + myInc / 2;
+            int64_t maximum = myTime / 4 + myInc;
+
+            // Never risk flagging: leave a safety margin on the clock.
+            if (maximum > myTime - 50)
+                maximum = myTime - 50;
+            if (maximum < 1)
+                maximum = 1;
+            if (optimum > maximum)
+                optimum = maximum;
+            if (optimum < 1)
+                optimum = 1;
+
+            softDeadline = searchStart + std::chrono::milliseconds(optimum);
+            deadline = searchStart + std::chrono::milliseconds(maximum);
         }
         else
+        {
             deadline = searchStart + std::chrono::hours(24);
+            softDeadline = deadline;
+        }
     }
 
     void checkTime()
@@ -475,6 +496,16 @@ namespace
 
         if (ply > seldepth)
             seldepth = ply;
+
+        // Mate distance pruning: a mate found this deep cannot be shorter than
+        // one from the current ply, so tighten the window accordingly.
+        // Returning alpha keeps the score inside the already-proven bracket.
+        if (alpha < -MATE + ply)
+            alpha = -MATE + ply;
+        if (beta > MATE - ply - 1)
+            beta = MATE - ply - 1;
+        if (alpha >= beta)
+            return alpha;
 
         const Color us = pos.sideToMove;
         const int originalAlpha = alpha;
@@ -823,6 +854,12 @@ namespace
         const auto start = std::chrono::steady_clock::now();
         int previousScore = 0;
 
+        // Dynamic time management state: how many consecutive iterations the
+        // best move has been unchanged, and whether the score fell last depth.
+        Move stableMove;
+        int stableIterations = 0;
+        int scoreDrop = 0;
+
         for (int depth = 1; depth <= maxDepth; ++depth)
         {
             const int mpvCount = isMain ? multiPVSetting : 1;
@@ -843,7 +880,10 @@ namespace
                     break;
 
                 if (mpv == 1)
+                {
+                    scoreDrop = previousScore - score; // > 0 means the score fell
                     previousScore = score;
+                }
 
                 // Only the main thread reports: helper threads search silently
                 // and contribute through the shared transposition table.
@@ -880,6 +920,27 @@ namespace
 
             if (stopFlag.load(std::memory_order_relaxed))
                 break;
+
+            // Dynamic time management: once the optimum time has elapsed, stop
+            // early if the best move has been stable for several iterations and
+            // the score did not fall. Otherwise keep searching up to the hard
+            // limit (enforced by checkTime) in case the position is harder than
+            // the clock suggested. Suppressed while pondering pre-hit.
+            if (isMain && depth >= 4 &&
+                !(ponderFlag.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed)))
+            {
+                if (pvTable[0][0] == stableMove)
+                    ++stableIterations;
+                else
+                {
+                    stableMove = pvTable[0][0];
+                    stableIterations = 0;
+                }
+
+                if (stableIterations >= 3 && scoreDrop <= 0 &&
+                    std::chrono::steady_clock::now() >= softDeadline)
+                    stopFlag.store(true, std::memory_order_relaxed);
+            }
 
             if (depth >= maxDepth)
                 break;
