@@ -399,6 +399,7 @@ namespace
     // Emit up to 'depth' root moves in a single line (worker 0 only).
     // Called once per depth instead of printing a currmove line per move
     // during the search, which costs nps.
+    /*
     void printRootMoves(const Position &pos, int depth)
     {
         MoveList list;
@@ -416,7 +417,7 @@ namespace
             std::cout << " currmove " << moveToUci(scored[i].move);
         std::cout << std::endl;
     }
-
+    */
     int quiescence(Position &pos, int alpha, int beta, int ply);
 
     // Integer floor(log2(n)) for n >= 1.
@@ -827,9 +828,9 @@ namespace
             const int mpvCount = isMain ? multiPVSetting : 1;
             excludedRootMoves.clear();
 
-            if (isMain && depth >= 12)
+            /*if (isMain && depth >= 12)
                 printRootMoves(pos, depth);
-
+            */
             for (int mpv = 1; mpv <= mpvCount; ++mpv)
             {
                 currentMultiPV = mpv;
