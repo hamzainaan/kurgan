@@ -227,8 +227,15 @@ namespace
             const int64_t myTime = us == WHITE ? limits.wtime : limits.btime;
             const int64_t myInc = us == WHITE ? limits.winc : limits.binc;
 
-            int64_t optimum = myTime / 20 + myInc / 2;
-            int64_t maximum = myTime / 4 + myInc;
+            // Blitz-friendly allocation. The optimum spreads the remaining
+            // clock over an assumed ~40 moves; the hard limit is capped at
+            // twice the optimum (and at an eighth of the clock) so that an
+            // unstable middlegame search, which falls through to the hard
+            // limit, cannot burn a large share of the remaining time.
+            int64_t optimum = myTime / 40 + myInc / 2;
+            int64_t maximum = optimum * 2;
+            if (maximum > myTime / 8)
+                maximum = myTime / 8;
 
             // Never risk flagging: leave a safety margin on the clock.
             if (maximum > myTime - 50)
