@@ -500,6 +500,11 @@ namespace
 
     int alphaBeta(Position &pos, int depth, int alpha, int beta, int ply, bool pvNode)
     {
+        // Every node owns exactly one PV slot. Reset it before any early
+        // return so a parent never copies moves left over at this ply by an
+        // earlier search (which would print an illegal principal variation).
+        pvLength[ply] = ply;
+
         if (ply >= MAX_PLY - 1)
             return evaluate::evaluate(pos);
 
@@ -630,7 +635,6 @@ namespace
         Move bestMove;
         int bestScore = -INF;
         int legalMoves = 0;
-        pvLength[ply] = ply;
 
         for (int i = 0; i < count; ++i)
         {
@@ -742,6 +746,10 @@ namespace
 
     int quiescence(Position &pos, int alpha, int beta, int ply)
     {
+        // As in alphaBeta: a node that returns immediately must not leave a
+        // stale PV behind for its parent to copy.
+        pvLength[ply] = ply;
+
         if (ply >= MAX_PLY - 1)
             return evaluate::evaluate(pos);
 
@@ -752,9 +760,6 @@ namespace
 
         if (ply > seldepth)
             seldepth = ply;
-
-        // Let the parent copy a valid principal variation back up.
-        pvLength[ply] = ply;
 
         const Color us = pos.sideToMove;
         const Color them = static_cast<Color>(us ^ 1);
