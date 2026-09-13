@@ -497,6 +497,11 @@ Bitboard movegen::attacks(PieceType pt, Square sq, Bitboard occupied)
     return pieceAttacks(pt, sq, occupied);
 }
 
+Bitboard movegen::pawnAttacksFrom(Color c, Square sq)
+{
+    return pawnAttacks[c][sq];
+}
+
 bool movegen::squareAttacked(const Position &pos, Square sq, Color by)
 {
     const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];

@@ -2,6 +2,7 @@
 
 #include "evaluate.h"
 #include "see.h"
+#include "tuned_params.h"
 
 #include <algorithm>
 #include <chrono>
@@ -23,14 +24,32 @@ namespace
     constexpr int MAX_PLY = 128;
     constexpr int MAX_DEPTH = 64;
 
-    // Futility pruning tuning (depth-dependent margins).
-    constexpr int RFP_DEPTH = 7;             // reverse (parent-node) futility depth limit
-    constexpr int RFP_MARGIN = 80;           // per-ply reverse futility margin
-    constexpr int FUTILITY_DEPTH = 1;        // child-node futility depth limit
-    constexpr int FUTILITY_MARGIN = 120;     // per-ply child-node futility margin
-    constexpr int MOVE_FUTILITY_DEPTH = 4;   // move-level futility depth limit
-    constexpr int MOVE_FUTILITY_MARGIN = 90; // per-ply move-level futility margin
-    constexpr int SEE_QUIET_DEPTH = 6;       // depth limit for SEE-based quiet pruning
+    // Futility / pruning thresholds live in tuned_params.h so a match-based
+    // tuner can override them at runtime through UCI options.
+
+    // Runtime-tunable pruning parameters, exposed as UCI spin options.
+    struct TuningParam
+    {
+        const char *name;
+        int *value;
+        int minValue;
+        int maxValue;
+    };
+
+    const TuningParam tuningParams[] = {
+        {"RFP Depth", &tuned::RFP_DEPTH, 0, 16},
+        {"RFP Margin", &tuned::RFP_MARGIN, 0, 400},
+        {"Futility Depth", &tuned::FUTILITY_DEPTH, 0, 8},
+        {"Futility Margin", &tuned::FUTILITY_MARGIN, 0, 500},
+        {"Move Futility Depth", &tuned::MOVE_FUTILITY_DEPTH, 0, 12},
+        {"Move Futility Margin", &tuned::MOVE_FUTILITY_MARGIN, 0, 500},
+        {"SEE Quiet Depth", &tuned::SEE_QUIET_DEPTH, 0, 16},
+        {"NMP Min Depth", &tuned::NMP_MIN_DEPTH, 2, 12},
+        {"NMP Base", &tuned::NMP_BASE, 1, 12},
+        {"NMP Depth Div", &tuned::NMP_DEPTH_DIV, 1, 16},
+        {"NMP Eval Div", &tuned::NMP_EVAL_DIV, 50, 1000},
+        {"NMP Verify Depth", &tuned::NMP_VERIFY_DEPTH, 2, 32},
+    };
 
     // Transposition table bounds.
     constexpr int BOUND_NONE = 0;
@@ -549,12 +568,12 @@ namespace
             // Reverse Futility Pruning (parent-node futility): if the static
             // eval is so far above beta that a shallow search cannot drop
             // below it, return immediately.
-            if (!inCheck && depth <= RFP_DEPTH && staticEval - RFP_MARGIN * depth >= beta)
+            if (!inCheck && depth <= tuned::RFP_DEPTH && staticEval - tuned::RFP_MARGIN * depth >= beta)
                 return staticEval;
 
             // Child-Node Futility Pruning: at pre-frontier nodes a quiet
             // position whose eval cannot reach alpha returns immediately.
-            if (!inCheck && depth <= FUTILITY_DEPTH && staticEval + FUTILITY_MARGIN * depth <= alpha)
+            if (!inCheck && depth <= tuned::FUTILITY_DEPTH && staticEval + tuned::FUTILITY_MARGIN * depth <= alpha)
                 return staticEval;
         }
 
@@ -565,11 +584,12 @@ namespace
         const Bitboard nonPawn = pos.byType[KNIGHT] | pos.byType[BISHOP] |
                                  pos.byType[ROOK] | pos.byType[QUEEN];
 
-        if (!pvNode && !inNullVerification && !inCheck && depth >= 3 && (nonPawn & pos.byColor[us]) && staticEval >= beta)
+        if (!pvNode && !inNullVerification && !inCheck && depth >= tuned::NMP_MIN_DEPTH && (nonPawn & pos.byColor[us]) && staticEval >= beta)
         {
             // Dynamic null move reduction: deeper nodes and a larger eval
             // margin above beta allow a more aggressive reduction.
-            int R = 3 + depth / 4 + std::min(2, (staticEval - beta) / 200);
+            int R = tuned::NMP_BASE + depth / tuned::NMP_DEPTH_DIV +
+                    std::min(2, (staticEval - beta) / tuned::NMP_EVAL_DIV);
             R = std::min(R, depth - 1);
 
             // Null move search.
@@ -584,7 +604,7 @@ namespace
 
                 // Verification search at deep nodes to guard against
                 // zugzwang-induced false cutoffs.
-                if (depth >= 12)
+                if (depth >= tuned::NMP_VERIFY_DEPTH)
                 {
                     inNullVerification = true;
                     const int verify = alphaBeta(pos, depth - R, beta - 1, beta, ply, false);
@@ -619,12 +639,12 @@ namespace
 
             // Move-Level Futility Pruning: skip quiet moves that cannot raise
             // alpha even with a generous positional gain.
-            if (!pvNode && !inCheck && quiet && depth <= MOVE_FUTILITY_DEPTH &&
-                legalMoves >= 1 && staticEval + MOVE_FUTILITY_MARGIN * depth <= alpha)
+            if (!pvNode && !inCheck && quiet && depth <= tuned::MOVE_FUTILITY_DEPTH &&
+                legalMoves >= 1 && staticEval + tuned::MOVE_FUTILITY_MARGIN * depth <= alpha)
                 continue;
 
             // SEE-Based Quiet Pruning: skip quiet moves that hang material.
-            if (!pvNode && !inCheck && quiet && depth <= SEE_QUIET_DEPTH &&
+            if (!pvNode && !inCheck && quiet && depth <= tuned::SEE_QUIET_DEPTH &&
                 see::evaluate(pos, m) < 0)
                 continue;
 
@@ -1120,4 +1140,35 @@ void search::ponderhit()
     ponderHitFlag.store(true, std::memory_order_relaxed);
     bestmoveEmitted.store(false, std::memory_order_relaxed);
     computeDeadline(activeLimits, activeUs);
+}
+
+std::string search::tuningOptionsUci()
+{
+    std::string out;
+    for (const TuningParam &p : tuningParams)
+    {
+        out += "option name ";
+        out += p.name;
+        out += " type spin default ";
+        out += std::to_string(*p.value);
+        out += " min ";
+        out += std::to_string(p.minValue);
+        out += " max ";
+        out += std::to_string(p.maxValue);
+        out += '\n';
+    }
+    return out;
+}
+
+bool search::setTuningOption(const std::string &name, int value)
+{
+    for (const TuningParam &p : tuningParams)
+    {
+        if (name == p.name)
+        {
+            *p.value = std::clamp(value, p.minValue, p.maxValue);
+            return true;
+        }
+    }
+    return false;
 }

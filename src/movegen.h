@@ -76,6 +76,9 @@ namespace movegen
     // Attack bitboard for a non-pawn piece type from a square, given occupancy.
     Bitboard attacks(PieceType pt, Square sq, Bitboard occupied);
 
+    // Squares from which a pawn of color 'c' attacks 'sq'.
+    Bitboard pawnAttacksFrom(Color c, Square sq);
+
     // True if 'sq' is attacked by color 'by'.
     bool squareAttacked(const Position &pos, Square sq, Color by);
 

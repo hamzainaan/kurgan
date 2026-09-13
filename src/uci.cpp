@@ -1,6 +1,7 @@
 #include "uci.h"
 
 #include "bench.h"
+#include "evaluate.h"
 #include "movegen.h"
 #include "perft.h"
 #include "position.h"
@@ -191,6 +192,7 @@ void uci::loop()
             std::cout << "option name Ponder type check default false" << std::endl;
             std::cout << "option name MultiPV type spin default 1 min 1 max 64" << std::endl;
             std::cout << "option name Clear Hash type button" << std::endl;
+            std::cout << search::tuningOptionsUci();
             std::cout << "uciok" << std::endl;
         }
         else if (cmd == "isready")
@@ -249,6 +251,8 @@ void uci::loop()
                     search::setMultiPV(std::stoi(value));
                 else if (name == "Clear Hash")
                     search::clear();
+                else
+                    search::setTuningOption(name, std::stoi(value));
             }
             catch (...)
             {
@@ -314,6 +318,11 @@ void uci::loop()
                     std::cout << " nps " << (n * 1000 / static_cast<uint64_t>(ms));
                 std::cout << std::endl;
             }
+        }
+        else if (cmd == "eval")
+        {
+            joinSearch();
+            std::cout << "eval " << evaluate::evaluate(pos) << std::endl;
         }
         else if (cmd == "bench")
         {

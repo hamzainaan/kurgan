@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/hamzainaan/kurgan/actions/workflows/build.yml">
-    <img src="https://github.com/hamzainaan/kurgan/actions/workflows/build.yml/badge.svg?branch=main&event=push" alt="Build Kurgan">
+    <img src="https://github.com/hamzainaan/kurgan/actions/workflows/build.yml/badge.svg?branch=main&event=push" alt="Build">
   </a>
   <a href="https://github.com/hamzainaan/kurgan/actions/workflows/build.yml">
     <img src="https://img.shields.io/github/actions/workflow/status/hamzainaan/kurgan/build.yml?branch=main&event=push&label=CI&logo=githubactions&logoColor=white&style=flat-square" alt="CI">

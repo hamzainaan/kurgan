@@ -11,7 +11,7 @@
 namespace
 {
     constexpr int DEFAULT_DEPTH = 12;
-    constexpr int BENCH_HASH_MB = 16;
+    constexpr int BENCH_HASH_MB = 64;
 
     constexpr const char *POSITIONS[] = {
         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
