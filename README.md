@@ -1,3 +1,19 @@
+<p align="center">
+  <img src="logo/logo256.png" alt="Kurgan" width="200">
+</p>
+
+<p align="center">
+  <a href="https://github.com/hamzainaan/kurgan/actions/workflows/build.yml">
+    <img src="https://github.com/hamzainaan/kurgan/actions/workflows/build.yml/badge.svg?branch=main&event=push" alt="Build Kurgan">
+  </a>
+  <a href="https://github.com/hamzainaan/kurgan/actions/workflows/build.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/hamzainaan/kurgan/build.yml?branch=main&event=push&label=CI&logo=githubactions&logoColor=white&style=flat-square" alt="CI">
+  </a>
+  <a href="https://github.com/hamzainaan/kurgan/actions/workflows/build.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/hamzainaan/kurgan/build.yml?branch=main&label=main&logo=git&logoColor=white&style=flat-square" alt="main build">
+  </a>
+</p>
+
 # Kurgan
 
 A UCI chess engine, written in C++23, mostly to see whether I could. Turns out I could, eventually.
