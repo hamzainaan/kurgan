@@ -1,6 +1,8 @@
 #include "uci.h"
 
+#include "bench.h"
 #include "movegen.h"
+#include "perft.h"
 #include "position.h"
 #include "search.h"
 
@@ -152,27 +154,6 @@ namespace
         }
         return limits;
     }
-
-    // Count legal move nodes for movegen validation.
-    uint64_t perft(Position &pos, int depth)
-    {
-        if (depth == 0)
-            return 1;
-
-        MoveList list;
-        movegen::generate_pseudo_legal_moves(pos, list);
-
-        uint64_t nodes = 0;
-        for (int i = 0; i < list.size; ++i)
-        {
-            const Move m = list.moves[i];
-            if (!pos.do_move(m))
-                continue;
-            nodes += perft(pos, depth - 1);
-            pos.undo_move(m);
-        }
-        return nodes;
-    }
 }
 
 void uci::loop()
@@ -298,18 +279,48 @@ void uci::loop()
         }
         else if (cmd == "perft")
         {
-            int depth = 1;
-            ss >> depth;
             joinSearch();
-            const auto start = std::chrono::steady_clock::now();
-            const uint64_t n = perft(pos, depth);
-            const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                     std::chrono::steady_clock::now() - start)
-                                     .count();
-            std::cout << "perft " << depth << " nodes " << n;
-            if (ms > 0)
-                std::cout << " nps " << (n * 1000 / static_cast<uint64_t>(ms));
-            std::cout << std::endl;
+
+            std::string arg;
+            ss >> arg;
+
+            if (arg == "suite")
+            {
+                perft::suite();
+            }
+            else if (arg == "divide")
+            {
+                int depth = 1;
+                ss >> depth;
+                perft::divide(pos, depth);
+            }
+            else
+            {
+                int depth = 1;
+                if (!arg.empty())
+                {
+                    std::istringstream ds(arg);
+                    if (!(ds >> depth))
+                        depth = 1;
+                }
+
+                const auto start = std::chrono::steady_clock::now();
+                const uint64_t n = perft::nodes(pos, depth);
+                const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now() - start)
+                                         .count();
+                std::cout << "perft " << depth << " nodes " << n << " time " << ms << " ms";
+                if (ms > 0)
+                    std::cout << " nps " << (n * 1000 / static_cast<uint64_t>(ms));
+                std::cout << std::endl;
+            }
+        }
+        else if (cmd == "bench")
+        {
+            joinSearch();
+            int depth = 0;
+            ss >> depth;
+            bench::run(depth);
         }
         else if (cmd == "quit")
         {

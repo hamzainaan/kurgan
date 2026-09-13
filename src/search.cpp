@@ -78,6 +78,7 @@ namespace
 
     std::mutex outputMutex;
     std::mutex bestMutex;
+    bool silentOutput = false;
     int completedDepth = 0;
     Move finalBestMove;
 
@@ -208,8 +209,6 @@ namespace
         e.bound = static_cast<int8_t>(bound);
     }
 
-    std::string moveToUci(Move m);
-
     // Dynamic time management: the optimum (soft) deadline is the target for a
     // stable search, while the maximum (hard) deadline is cut off
     // unconditionally by checkTime(). Unstable searches spend up to the hard
@@ -280,8 +279,11 @@ namespace
                     std::lock_guard<std::mutex> lock(bestMutex);
                     bm = finalBestMove;
                 }
-                std::lock_guard<std::mutex> lock(outputMutex);
-                std::cout << "bestmove " << (bm == Move() ? "0000" : moveToUci(bm)) << std::endl;
+                if (!silentOutput)
+                {
+                    std::lock_guard<std::mutex> lock(outputMutex);
+                    std::cout << "bestmove " << (bm == Move() ? "0000" : moveToUci(bm)) << std::endl;
+                }
             }
             deadline = std::chrono::steady_clock::now() + std::chrono::hours(24);
             return;
@@ -311,18 +313,6 @@ namespace
     TTEntry &ttEntry(uint64_t key)
     {
         return tt[key & ttMask];
-    }
-
-    std::string moveToUci(Move m)
-    {
-        std::string s;
-        s += static_cast<char>('a' + (m.from() & 7));
-        s += static_cast<char>('1' + (m.from() >> 3));
-        s += static_cast<char>('a' + (m.to() & 7));
-        s += static_cast<char>('1' + (m.to() >> 3));
-        if (m.isPromotion())
-            s += "nbrq"[m.promoType() - KNIGHT];
-        return s;
     }
 
     int mvvLva(const Position &pos, Move m)
@@ -392,6 +382,9 @@ namespace
 
     void printInfo(int depth, int score, uint64_t nodeCount, long long elapsedMs, const Move *pv, int pvLen, int mpv = 1)
     {
+        if (silentOutput)
+            return;
+
         std::lock_guard<std::mutex> lock(outputMutex);
 
         std::cout << "info depth " << depth << " seldepth " << seldepth << " multipv " << mpv;
@@ -1012,7 +1005,7 @@ void search::go(const Position &root, const SearchLimits &limits)
     for (auto &t : threads)
         t.join();
 
-    if (!bestmoveEmitted.load(std::memory_order_relaxed))
+    if (!bestmoveEmitted.load(std::memory_order_relaxed) && !silentOutput)
     {
         std::lock_guard<std::mutex> lock(outputMutex);
         std::cout << "bestmove " << (finalBestMove == Move() ? "0000" : moveToUci(finalBestMove)) << std::endl;
@@ -1059,11 +1052,21 @@ void search::setHashSize(int megabytes)
 
 void search::setThreads(int count)
 {
-    if (count < 1)
-        count = 1;
+    if (count < 0)
+        count = 0;
     if (count > 256)
         count = 256;
     threadCountSetting = count;
+}
+
+int search::threadSetting()
+{
+    return threadCountSetting;
+}
+
+void search::setSilent(bool enabled)
+{
+    silentOutput = enabled;
 }
 
 int search::hashSize()

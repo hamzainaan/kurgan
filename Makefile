@@ -117,10 +117,13 @@ $(OBJ_DIR):
 #   2. make bench
 #   3. make MODE=profile-use
 bench: $(EXE)
-	printf 'uci\nisready\nucinewgame\nposition startpos moves e2e4 e7e5 g1f3 b8c6\ngo depth 10\nquit\n' | ./$(EXE)
+	printf 'bench\nquit\n' | ./$(EXE)
+
+test: $(EXE)
+	printf 'perft suite\nbench\nquit\n' | ./$(EXE)
 
 clean:
 	rm -rf $(BUILD_DIR) $(ENGINE) $(ENGINE).exe
 
-.PHONY: all bench clean
+.PHONY: all bench test clean
 -include $(DEPS)

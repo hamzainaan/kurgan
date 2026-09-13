@@ -115,7 +115,7 @@ namespace
         0x0000404040040100ULL, 0x0000808100020100ULL, 0x0001010100020800ULL, 0x0000808080010400ULL,
         0x0000820820004000ULL, 0x0000410410002000ULL, 0x0000082088001000ULL, 0x0000002011000800ULL,
         0x0000080100400400ULL, 0x0001010101000200ULL, 0x0002020202000400ULL, 0x0001010101000200ULL,
-        0x0000410410400000ULL, 0x0000208208200000ULL, 0x0000002084100000ULL, 0x0000000020888000ULL,
+        0x0000410410400000ULL, 0x0000208208200000ULL, 0x0000002084100000ULL, 0x00220A0084240800ULL,
         0x0000001002020000ULL, 0x0000040408020000ULL, 0x0004040404040000ULL, 0x0002020202020000ULL,
         0x0000104104104000ULL, 0x0000002082082000ULL, 0x0000000020841000ULL, 0x0000000000208800ULL,
         0x0000000010020200ULL, 0x0000000404080200ULL, 0x0000040404040400ULL, 0x0002020202020200ULL};
@@ -551,4 +551,16 @@ bool movegen::is_legal(const Position &pos, Move move)
     makeMove(copy, move);
     const Square ksq = lsb(copy.byColor[us] & copy.byType[KING]);
     return !squareAttacked(copy, ksq, them);
+}
+
+std::string moveToUci(Move m)
+{
+    std::string s;
+    s += static_cast<char>('a' + (m.from() & 7));
+    s += static_cast<char>('1' + (m.from() >> 3));
+    s += static_cast<char>('a' + (m.to() & 7));
+    s += static_cast<char>('1' + (m.to() >> 3));
+    if (m.isPromotion())
+        s += "nbrq"[m.promoType() - KNIGHT];
+    return s;
 }

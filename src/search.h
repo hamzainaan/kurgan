@@ -50,6 +50,10 @@ namespace search
     void setPonder(bool enabled);
     int hashSize();
     int threadCount();
+    int threadSetting();
     int multiPV();
     bool ponderEnabled();
+
+    // Suppress all search output (used by the benchmark).
+    void setSilent(bool enabled);
 }

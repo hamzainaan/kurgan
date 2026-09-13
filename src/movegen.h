@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 
 // Flags packed into the upper four bits of a move.
 enum MoveFlag : uint16_t
@@ -63,6 +64,9 @@ struct MoveList
     Move &operator[](int i) { return moves[i]; }
     const Move &operator[](int i) const { return moves[i]; }
 };
+
+// Render a move in coordinate notation ("e2e4", "e7e8q").
+std::string moveToUci(Move m);
 
 namespace movegen
 {
