@@ -171,6 +171,7 @@ namespace
             return false;
 
         const Bitboard lightSquares = 0x55AA55AA55AA55AAULL;
+        const Bitboard minors = pos.byType[KNIGHT] | pos.byType[BISHOP];
         const int knights = popCount(pos.byType[KNIGHT]);
         const int bishops = popCount(pos.byType[BISHOP]);
 
@@ -179,7 +180,8 @@ namespace
             return true;
 
         // K + two knights vs K cannot force mate.
-        if (knights == 2 && bishops == 0)
+        if (knights == 2 && bishops == 0 &&
+            (popCount(minors & pos.byColor[WHITE]) == 2 || popCount(minors & pos.byColor[BLACK]) == 2))
             return true;
 
         // All bishops on the same color square.
@@ -187,16 +189,6 @@ namespace
         {
             const Bitboard b = pos.byType[BISHOP];
             if (!(b & lightSquares) || !(b & ~lightSquares))
-                return true;
-        }
-
-        // King + bishop vs king + knight (one minor each).
-        if (knights == 1 && bishops == 1)
-        {
-            const Bitboard minors = pos.byType[KNIGHT] | pos.byType[BISHOP];
-            const int w = popCount(minors & pos.byColor[WHITE]);
-            const int b = popCount(minors & pos.byColor[BLACK]);
-            if (w == 1 && b == 1)
                 return true;
         }
 
@@ -625,12 +617,12 @@ namespace
         const Move counter = prevMove == Move() ? Move() : counterMoves[us][prevMove.from()][prevMove.to()];
 
         // Deterministic draws are cached in the transposition table.
-        if (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos))
+        if (ply > 0 && (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos)))
         {
             ttStore(key, Move(), 0, depth, BOUND_EXACT, ply);
             return 0;
         }
-        if (pos.isRepetition(ply))
+        if (ply > 0 && pos.isRepetition(ply))
             return 0;
 
         // Transposition table probe.
@@ -961,6 +953,8 @@ namespace
 
             if (score <= alpha)
             {
+                if (alpha <= -INF)
+                    return score;
                 // Fail-low: lower alpha and tighten beta toward the true value.
                 beta = (alpha + beta) / 2;
                 alpha = std::max(-INF, score - delta);
@@ -1154,6 +1148,22 @@ void search::go(const Position &root, const SearchLimits &limits)
 
     for (auto &t : threads)
         t.join();
+
+    // Never report 0000 while the root position has a legal move.
+    if (finalBestMove == Move())
+    {
+        MoveList list;
+        movegen::generate_pseudo_legal_moves(root, list);
+        for (int i = 0; i < list.size; ++i)
+        {
+            Position next = root;
+            if (next.do_move(list.moves[i]))
+            {
+                finalBestMove = list.moves[i];
+                break;
+            }
+        }
+    }
 
     if (!bestmoveEmitted.load(std::memory_order_relaxed) && !silentOutput)
     {

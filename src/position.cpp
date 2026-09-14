@@ -207,7 +207,8 @@ bool Position::do_move(Move move)
     }
 
     // Save state for unmake.
-    UndoInfo &undo = undoStack[undoCount++];
+    UndoInfo &undo = undoStack[undoCount];
+    undoCount = (undoCount + 1) & (MAX_UNDO - 1);
     undo.movedPiece = piece;
     undo.capturedPiece = board[to];
     undo.prevCastlingRights = castlingRights;
@@ -278,7 +279,8 @@ bool Position::do_move(Move move)
     // Track position history for repetition detection.
     if (pt == PAWN || undo.capturedPiece != NO_PIECE)
         historyStart = historyCount; // irreversible move: nothing earlier can repeat
-    historyKeys[historyCount++] = zobristKey;
+    historyKeys[historyCount & (MAX_HISTORY - 1)] = zobristKey;
+    ++historyCount;
 
     // Legality: the mover's king must not be attacked after the move.
     Square ksq = to;
@@ -306,7 +308,8 @@ void Position::undo_move(Move move)
     const Color us = static_cast<Color>(sideToMove ^ 1); // side that moved
     const Square from = move.from();
     const Square to = move.to();
-    UndoInfo &undo = undoStack[--undoCount];
+    undoCount = (undoCount - 1) & (MAX_UNDO - 1);
+    UndoInfo &undo = undoStack[undoCount];
 
     // Revert hash for side, castling, and en passant.
     zobristKey ^= sideKey;
@@ -364,7 +367,8 @@ void Position::do_null_move()
     initZobrist();
 
     // Save state for unmake.
-    UndoInfo &undo = undoStack[undoCount++];
+    UndoInfo &undo = undoStack[undoCount];
+    undoCount = (undoCount + 1) & (MAX_UNDO - 1);
     undo.prevEnPassantSquare = enPassantSquare;
     undo.prevHalfmoveClock = halfmoveClock;
     undo.prevHistoryCount = historyCount;
@@ -380,7 +384,8 @@ void Position::do_null_move()
 
 void Position::undo_null_move()
 {
-    UndoInfo &undo = undoStack[--undoCount];
+    undoCount = (undoCount - 1) & (MAX_UNDO - 1);
+    UndoInfo &undo = undoStack[undoCount];
 
     sideToMove = static_cast<Color>(sideToMove ^ 1);
     enPassantSquare = undo.prevEnPassantSquare;
@@ -396,13 +401,15 @@ bool Position::isRepetition(int ply) const
 {
     const uint64_t key = zobristKey;
     const int rootCount = historyCount - ply;
+    const int oldest = historyCount - MAX_HISTORY;
+    const int from = oldest > historyStart ? oldest : historyStart;
     int gameMatches = 0;
 
     // Same side to move recurs every two plies; the previous one is two
     // entries behind the current position (which sits at historyCount - 1).
-    for (int i = historyCount - 3; i >= historyStart; i -= 2)
+    for (int i = historyCount - 3; i >= from; i -= 2)
     {
-        if (historyKeys[i] != key)
+        if (historyKeys[i & (MAX_HISTORY - 1)] != key)
             continue;
         if (i >= rootCount)
             return true; // second occurrence inside the search
