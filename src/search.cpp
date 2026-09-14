@@ -333,7 +333,8 @@ namespace
 
     bool isTactical(const Position &pos, Move m)
     {
-        return m.isPromotion() || m.isEnPassant() || pos.board[m.to()] != NO_PIECE;
+        // Castling is a quiet move whose "to" square holds our own rook.
+        return m.isPromotion() || m.isEnPassant() || (!m.isCastling() && pos.board[m.to()] != NO_PIECE);
     }
 
     // The captured piece, treating en passant as capturing a pawn.
@@ -418,7 +419,7 @@ namespace
                 else if (m == counterMove)
                     score = COUNTERMOVE_SCORE;
                 else
-                    score = history[us][m.from()][m.to()];
+                    score = history[us][m.from()][moveTarget(m)];
 
                 moves[count++] = {score, m, static_cast<uint16_t>(count)};
             }
@@ -614,7 +615,7 @@ namespace
         const uint64_t key = pos.zobristKey;
 
         const Move prevMove = moveStack[ply];
-        const Move counter = prevMove == Move() ? Move() : counterMoves[us][prevMove.from()][prevMove.to()];
+        const Move counter = prevMove == Move() ? Move() : counterMoves[us][prevMove.from()][moveTarget(prevMove)];
 
         // Deterministic draws are cached in the transposition table.
         if (ply > 0 && (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos)))
@@ -767,7 +768,7 @@ namespace
                 // Late Move Reduction: reduce late, quiet moves.
                 int r = 0;
                 if (quiet)
-                    r = lmrReduction(pvNode, depth, legalMoves, history[us][m.from()][m.to()]);
+                    r = lmrReduction(pvNode, depth, legalMoves, history[us][m.from()][moveTarget(m)]);
 
                 const int newDepth = std::max(0, depth - 1 - r);
 
@@ -803,7 +804,7 @@ namespace
                         if (quiet)
                         {
                             if (prevMove != Move())
-                                counterMoves[us][prevMove.from()][prevMove.to()] = m;
+                                counterMoves[us][prevMove.from()][moveTarget(prevMove)] = m;
 
                             if (killers[0][ply] != m)
                             {
@@ -812,9 +813,9 @@ namespace
                             }
 
                             const int bonus = depth * depth;
-                            updateHistory(history[us][m.from()][m.to()], bonus);
+                            updateHistory(history[us][m.from()][moveTarget(m)], bonus);
                             for (int k = 0; k < searchedQuietCount - 1; ++k)
-                                updateHistory(history[us][searchedQuiets[k].from()][searchedQuiets[k].to()], -bonus);
+                                updateHistory(history[us][searchedQuiets[k].from()][moveTarget(searchedQuiets[k])], -bonus);
                         }
                         else
                         {
@@ -875,7 +876,7 @@ namespace
         const bool inCheck = ksq != SQ_NONE && movegen::squareAttacked(pos, ksq, them);
 
         const Move prevMove = moveStack[ply];
-        const Move counter = prevMove == Move() ? Move() : counterMoves[us][prevMove.from()][prevMove.to()];
+        const Move counter = prevMove == Move() ? Move() : counterMoves[us][prevMove.from()][moveTarget(prevMove)];
 
         if (pos.halfmoveClock >= 100 || pos.isRepetition(ply) || isInsufficientMaterial(pos))
             return 0;

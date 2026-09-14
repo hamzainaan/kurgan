@@ -61,7 +61,18 @@ namespace
         for (int i = 0; i < list.size; ++i)
         {
             const Move m = list.moves[i];
-            if (m.from() != from || m.to() != to)
+            if (m.from() != from)
+                continue;
+
+            if (m.isCastling())
+            {
+                if (movegen::chess960() ? m.to() == to
+                                        : (to == castlingKingTo(m) || to == m.to()))
+                    return m;
+                continue;
+            }
+
+            if (m.to() != to)
                 continue;
             if (m.isPromotion())
             {
@@ -190,6 +201,7 @@ void uci::loop()
             std::cout << "option name Hash type spin default 16 min 1 max 65536" << std::endl;
             std::cout << "option name Threads type spin default 1 min 1 max 256" << std::endl;
             std::cout << "option name Ponder type check default false" << std::endl;
+            std::cout << "option name UCI_Chess960 type check default false" << std::endl;
             std::cout << "option name MultiPV type spin default 1 min 1 max 64" << std::endl;
             std::cout << "option name Clear Hash type button" << std::endl;
             std::cout << search::tuningOptionsUci();
@@ -247,6 +259,8 @@ void uci::loop()
                     search::setThreads(std::stoi(value));
                 else if (name == "Ponder")
                     search::setPonder(value == "true");
+                else if (name == "UCI_Chess960")
+                    movegen::setChess960(value == "true");
                 else if (name == "MultiPV")
                     search::setMultiPV(std::stoi(value));
                 else if (name == "Clear Hash")
@@ -323,6 +337,12 @@ void uci::loop()
         {
             joinSearch();
             std::cout << "eval " << evaluate::evaluate(pos) << std::endl;
+        }
+        else if (cmd == "debug")
+        {
+            joinSearch();
+            pos.print_board();
+            std::cout << "Fen: " << pos.fen() << std::endl;
         }
         else if (cmd == "bench")
         {

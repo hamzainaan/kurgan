@@ -8,6 +8,10 @@
 
 namespace
 {
+    // Chess960 (Fischer Random) mode: only affects how castling moves are
+    // rendered in (and parsed from) coordinate notation.
+    bool chess960Mode = false;
+
     // Portable bit utilities.
     int popCount(Bitboard b)
     {
@@ -288,6 +292,43 @@ namespace
         }
     }
 
+    // Same as movegen::squareAttacked, but sliding attacks are resolved with the
+    // supplied occupancy. Castling has to test squares in positions where the
+    // king and/or the castling rook are somewhere else, which no plain
+    // occupancy query can express.
+    bool squareAttackedWith(const Position &pos, Square sq, Color by, Bitboard occ)
+    {
+        if (pawnAttacks[static_cast<Color>(by ^ 1)][sq] & pos.byColor[by] & pos.byType[PAWN])
+            return true;
+        if (knightAttacks[sq] & pos.byColor[by] & pos.byType[KNIGHT])
+            return true;
+        if (kingAttacks[sq] & pos.byColor[by] & pos.byType[KING])
+            return true;
+        if (bishopAttack(sq, occ) & pos.byColor[by] & (pos.byType[BISHOP] | pos.byType[QUEEN]))
+            return true;
+        if (rookAttack(sq, occ) & pos.byColor[by] & (pos.byType[ROOK] | pos.byType[QUEEN]))
+            return true;
+        return false;
+    }
+
+    // Squares strictly between 'a' and 'b'; both must share a rank (which is
+    // always the case for the squares a castling king or rook travels over).
+    Bitboard betweenOnRank(Square a, Square b)
+    {
+        const int lo = a < b ? a : b;
+        const int hi = a < b ? b : a;
+        Bitboard between = 0;
+        for (int s = lo + 1; s < hi; ++s)
+            between |= 1ULL << s;
+        return between;
+    }
+
+    Square kingSquareOf(const Position &pos, Color c)
+    {
+        const Bitboard k = pos.byColor[c] & pos.byType[KING];
+        return k ? lsb(k) : SQ_NONE;
+    }
+
     void putPiece(Position &pos, Piece p, Square sq)
     {
         const Bitboard bit = 1ULL << sq;
@@ -319,36 +360,23 @@ namespace
         const Piece piece = pos.board[from];
         removePiece(pos, from);
 
+        if (m.isCastling())
+        {
+            // King and rook are lifted before both are put back, so they may
+            // swap squares (Chess960: rook on f1, king on g1, ...).
+            removePiece(pos, to);
+            putPiece(pos, makePiece(us, KING), castlingKingTo(m));
+            putPiece(pos, makePiece(us, ROOK), castlingRookTo(m));
+            pos.sideToMove = them;
+            return;
+        }
+
         if (m.isEnPassant())
             removePiece(pos, static_cast<Square>(to + (us == WHITE ? -8 : 8)));
         else if (pos.board[to] != NO_PIECE)
             removePiece(pos, to);
 
         putPiece(pos, m.isPromotion() ? makePiece(us, m.promoType()) : piece, to);
-
-        if (m.isCastling())
-        {
-            if (to == SQ_G1)
-            {
-                removePiece(pos, SQ_H1);
-                putPiece(pos, W_ROOK, SQ_F1);
-            }
-            else if (to == SQ_C1)
-            {
-                removePiece(pos, SQ_A1);
-                putPiece(pos, W_ROOK, SQ_D1);
-            }
-            else if (to == SQ_G8)
-            {
-                removePiece(pos, SQ_H8);
-                putPiece(pos, B_ROOK, SQ_F8);
-            }
-            else if (to == SQ_C8)
-            {
-                removePiece(pos, SQ_A8);
-                putPiece(pos, B_ROOK, SQ_D8);
-            }
-        }
 
         pos.sideToMove = them;
     }
@@ -442,47 +470,68 @@ namespace
     void generateCastling(const Position &pos, MoveList &list)
     {
         const Color us = pos.sideToMove;
-        const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
+        const Square ksq = kingSquareOf(pos, us);
+        if (ksq == SQ_NONE)
+            return;
 
-        if (us == WHITE)
+        const Rank backRank = us == WHITE ? RANK_1 : RANK_8;
+
+        for (int s = 0; s < CASTLING_SIDE_NB; ++s)
         {
-            if ((pos.castlingRights & WHITE_OO) && pos.board[SQ_E1] == W_KING && pos.board[SQ_H1] == W_ROOK &&
-                !(occ & ((1ULL << SQ_F1) | (1ULL << SQ_G1))))
-                list.add(Move(SQ_E1, SQ_G1, CASTLING));
-            if ((pos.castlingRights & WHITE_OOO) && pos.board[SQ_E1] == W_KING && pos.board[SQ_A1] == W_ROOK &&
-                !(occ & ((1ULL << SQ_B1) | (1ULL << SQ_C1) | (1ULL << SQ_D1))))
-                list.add(Move(SQ_E1, SQ_C1, CASTLING));
-        }
-        else
-        {
-            if ((pos.castlingRights & BLACK_OO) && pos.board[SQ_E8] == B_KING && pos.board[SQ_H8] == B_ROOK &&
-                !(occ & ((1ULL << SQ_F8) | (1ULL << SQ_G8))))
-                list.add(Move(SQ_E8, SQ_G8, CASTLING));
-            if ((pos.castlingRights & BLACK_OOO) && pos.board[SQ_E8] == B_KING && pos.board[SQ_A8] == B_ROOK &&
-                !(occ & ((1ULL << SQ_B8) | (1ULL << SQ_C8) | (1ULL << SQ_D8))))
-                list.add(Move(SQ_E8, SQ_C8, CASTLING));
+            const CastlingSide side = static_cast<CastlingSide>(s);
+            if (!(pos.castlingRights & castlingRight(us, side)))
+                continue;
+
+            const Square rsq = pos.castlingRookSquare[us][side];
+            if (pos.board[rsq] != makePiece(us, ROOK))
+                continue;
+            if (rankOf(ksq) != backRank || rankOf(rsq) != backRank)
+                continue;
+
+            const Move m(ksq, rsq, CASTLING);
+            if (movegen::canCastle(pos, m))
+                list.add(m);
         }
     }
+}
 
-    bool castlingIsLegal(const Position &pos, Square to)
+bool movegen::canCastle(const Position &pos, Move move)
+{
+    const Color us = pos.sideToMove;
+    const Color them = static_cast<Color>(us ^ 1);
+    const Square kFrom = move.from();
+    const Square rFrom = move.to();
+
+    if (pos.board[kFrom] != makePiece(us, KING) || pos.board[rFrom] != makePiece(us, ROOK))
+        return false;
+
+    const CastlingSide side = isKingSideCastling(move) ? KING_SIDE : QUEEN_SIDE;
+    if (!(pos.castlingRights & castlingRight(us, side)) || pos.castlingRookSquare[us][side] != rFrom)
+        return false;
+
+    const Square kTo = castlingKingTo(move);
+    const Square rTo = castlingRookTo(move);
+    if (rankOf(kFrom) != rankOf(rFrom) || rankOf(kFrom) != rankOf(kTo) || rankOf(kFrom) != rankOf(rTo))
+        return false;
+
+    const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
+    const Bitboard king = 1ULL << kFrom;
+    const Bitboard rook = 1ULL << rFrom;
+
+    if ((occ ^ king ^ rook) &
+        (betweenOnRank(kFrom, kTo) | betweenOnRank(rFrom, rTo) | (1ULL << kTo) | (1ULL << rTo)))
+        return false;
+
+    const Bitboard kingPath = betweenOnRank(kFrom, kTo) | king;
+    for (Bitboard b = kingPath; b;)
     {
-        const Color us = pos.sideToMove;
-        const Color them = static_cast<Color>(us ^ 1);
-        const Square kFrom = us == WHITE ? SQ_E1 : SQ_E8;
-
-        if (movegen::squareAttacked(pos, kFrom, them))
+        const Square s = popLsb(b);
+        if (squareAttackedWith(pos, s, them, occ ^ king))
             return false;
-
-        if (to == SQ_G1 || to == SQ_G8)
-        {
-            const Square f = us == WHITE ? SQ_F1 : SQ_F8;
-            return !movegen::squareAttacked(pos, f, them) && !movegen::squareAttacked(pos, to, them);
-        }
-
-        const Square d = us == WHITE ? SQ_D1 : SQ_D8;
-        const Square c = us == WHITE ? SQ_C1 : SQ_C8;
-        return !movegen::squareAttacked(pos, d, them) && !movegen::squareAttacked(pos, c, them);
     }
+
+    const Bitboard afterKing = (occ & ~(king | rook)) | (1ULL << rTo);
+    return !squareAttackedWith(pos, kTo, them, afterKing);
 }
 
 void movegen::init()
@@ -504,19 +553,7 @@ Bitboard movegen::pawnAttacksFrom(Color c, Square sq)
 
 bool movegen::squareAttacked(const Position &pos, Square sq, Color by)
 {
-    const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
-
-    if (pawnAttacks[static_cast<Color>(by ^ 1)][sq] & pos.byColor[by] & pos.byType[PAWN])
-        return true;
-    if (knightAttacks[sq] & pos.byColor[by] & pos.byType[KNIGHT])
-        return true;
-    if (kingAttacks[sq] & pos.byColor[by] & pos.byType[KING])
-        return true;
-    if (bishopAttack(sq, occ) & pos.byColor[by] & (pos.byType[BISHOP] | pos.byType[QUEEN]))
-        return true;
-    if (rookAttack(sq, occ) & pos.byColor[by] & (pos.byType[ROOK] | pos.byType[QUEEN]))
-        return true;
-    return false;
+    return squareAttackedWith(pos, sq, by, pos.byColor[WHITE] | pos.byColor[BLACK]);
 }
 
 void movegen::generate_pseudo_legal_moves(const Position &pos, MoveList &list)
@@ -548,7 +585,7 @@ bool movegen::is_legal(const Position &pos, Move move)
     if (typeOf(pos.board[from]) == KING)
     {
         if (move.isCastling())
-            return castlingIsLegal(pos, to);
+            return canCastle(pos, move);
         return !squareAttacked(pos, to, them);
     }
 
@@ -558,13 +595,30 @@ bool movegen::is_legal(const Position &pos, Move move)
     return !squareAttacked(copy, ksq, them);
 }
 
+void movegen::setChess960(bool enabled)
+{
+    chess960Mode = enabled;
+}
+
+bool movegen::chess960()
+{
+    return chess960Mode;
+}
+
 std::string moveToUci(Move m)
 {
+    Square to = m.to();
+
+    // Castling is stored as king -> rook; in normal chess the GUI expects
+    // king -> king (e.g. e1g1).
+    if (m.isCastling() && !movegen::chess960())
+        to = castlingKingTo(m);
+
     std::string s;
-    s += static_cast<char>('a' + (m.from() & 7));
-    s += static_cast<char>('1' + (m.from() >> 3));
-    s += static_cast<char>('a' + (m.to() & 7));
-    s += static_cast<char>('1' + (m.to() >> 3));
+    s += static_cast<char>('a' + fileOf(m.from()));
+    s += static_cast<char>('1' + rankOf(m.from()));
+    s += static_cast<char>('a' + fileOf(to));
+    s += static_cast<char>('1' + rankOf(to));
     if (m.isPromotion())
         s += "nbrq"[m.promoType() - KNIGHT];
     return s;

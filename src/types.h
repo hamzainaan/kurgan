@@ -149,6 +149,16 @@ constexpr Square makeSquare(File f, Rank r)
     return static_cast<Square>((static_cast<int>(r) << 3) | static_cast<int>(f));
 }
 
+constexpr File fileOf(Square s)
+{
+    return static_cast<File>(static_cast<int>(s) & 7);
+}
+
+constexpr Rank rankOf(Square s)
+{
+    return static_cast<Rank>(static_cast<int>(s) >> 3);
+}
+
 // Compass directions as bitboard shifts.
 enum Direction : int
 {

@@ -13,6 +13,7 @@ namespace
         const char *fen;
         int maxDepth;
         uint64_t expected[7];
+        bool chess960 = false;
     };
 
     constexpr TestCase SUITE[] = {
@@ -34,6 +35,45 @@ namespace
         {"r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
          4,
          {1, 46, 2079, 89890, 3894594, 164075551, 6923051137ULL}},
+
+        // Chess960 positions
+        {"bbqnnrkr/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w HFhf - 0 1",
+         4,
+         {1, 20, 400, 9006, 201143, 0, 0},
+         true},
+        {"nrkbbnqr/pppppppp/8/8/8/8/PPPPPPPP/NRKBBQNR w HBhb - 0 1",
+         4,
+         {1, 19, 361, 7775, 167038, 0, 0},
+         true},
+        {"qrnnbkrb/pppppppp/8/8/8/8/PPPPPPPP/QRNNBKRB w GEge - 0 1",
+         4,
+         {1, 21, 441, 10202, 234327, 0, 0},
+         true},
+        // King already standing on g1: castling leaves it there, the rook
+        // walks h1 -> f1.
+        {"4k3/8/8/8/8/8/8/6KR w H - 0 1",
+         6,
+         {1, 12, 53, 948, 5571, 102638, 583228},
+         true},
+        // King and rook swapping squares (f1 <-> g1).
+        {"4k3/8/8/8/8/8/8/5KR1 w G - 0 1",
+         6,
+         {1, 13, 58, 1033, 5689, 105989, 601693},
+         true},
+        // Rook starting on the king's destination square.
+        {"4k3/8/8/8/8/8/8/1KR5 w C - 0 1",
+         6,
+         {1, 17, 73, 1303, 7087, 130211, 731357},
+         true},
+        // "e1g1" is an ordinary king move here; castling is spelled e1h1/e1a1.
+        {"4k3/8/8/8/8/8/8/R3K2R w HA - 0 1",
+         5,
+         {1, 26, 112, 3189, 17945, 532933, 0},
+         true},
+        {"r3k2r/8/8/8/8/8/8/R3K2R w HAha - 0 1",
+         4,
+         {1, 26, 568, 13744, 314346, 0, 0},
+         true},
     };
 }
 
@@ -101,7 +141,8 @@ bool perft::suite()
             total += got;
             ok = ok && pass;
 
-            std::cout << "perft " << (i + 1) << " depth " << depth
+            std::cout << "perft " << (i + 1) << (SUITE[i].chess960 ? " (960)" : "")
+                      << " depth " << depth
                       << " nodes " << got << " expected " << want
                       << (pass ? " ok" : " FAIL") << std::endl;
         }

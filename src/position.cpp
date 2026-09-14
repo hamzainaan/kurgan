@@ -95,23 +95,6 @@ namespace
         return s == SQ_NONE ? 0 : enPassantKeys[s & 7];
     }
 
-    // Castling rights remaining when a piece moves from, or is captured on, a square.
-    std::array<uint8_t, SQUARE_NB> makeCastlingMask()
-    {
-        std::array<uint8_t, SQUARE_NB> m{};
-        constexpr uint8_t all = WHITE_OO | WHITE_OOO | BLACK_OO | BLACK_OOO;
-        m.fill(all);
-        m[SQ_E1] = static_cast<uint8_t>(all & ~(WHITE_OO | WHITE_OOO));
-        m[SQ_H1] = static_cast<uint8_t>(all & ~WHITE_OO);
-        m[SQ_A1] = static_cast<uint8_t>(all & ~WHITE_OOO);
-        m[SQ_E8] = static_cast<uint8_t>(all & ~(BLACK_OO | BLACK_OOO));
-        m[SQ_H8] = static_cast<uint8_t>(all & ~BLACK_OO);
-        m[SQ_A8] = static_cast<uint8_t>(all & ~BLACK_OOO);
-        return m;
-    }
-
-    const std::array<uint8_t, SQUARE_NB> castlingMask = makeCastlingMask();
-
     int countrZero(Bitboard b)
     {
 #if defined(__GNUC__) || defined(__clang__)
@@ -135,6 +118,35 @@ namespace
     {
         return static_cast<Square>(countrZero(b));
     }
+
+    int countLeadingZeros(Bitboard b)
+    {
+#if defined(__GNUC__) || defined(__clang__)
+        return __builtin_clzll(b);
+#elif defined(_MSC_VER)
+        unsigned long index = 0;
+        _BitScanReverse64(&index, b);
+        return 63 - static_cast<int>(index);
+#else
+        int n = 0;
+        while ((b & 0x8000000000000000ULL) == 0)
+        {
+            b <<= 1;
+            ++n;
+        }
+        return n;
+#endif
+    }
+
+    Square msb(Bitboard b)
+    {
+        return static_cast<Square>(63 - countLeadingZeros(b));
+    }
+
+    Bitboard backRankOf(Color c)
+    {
+        return 0xFFULL << (8 * static_cast<int>(c == WHITE ? RANK_1 : RANK_8));
+    }
 }
 
 Position::Position()
@@ -157,6 +169,63 @@ void Position::clear()
     undoCount = 0;
     historyCount = 0;
     historyStart = 0;
+
+    castlingRookSquare[WHITE][KING_SIDE] = SQ_H1;
+    castlingRookSquare[WHITE][QUEEN_SIDE] = SQ_A1;
+    castlingRookSquare[BLACK][KING_SIDE] = SQ_H8;
+    castlingRookSquare[BLACK][QUEEN_SIDE] = SQ_A8;
+}
+
+Square Position::kingSquare(Color c) const
+{
+    const Bitboard k = byColor[c] & byType[KING];
+    return k ? lsb(k) : SQ_NONE;
+}
+
+std::string Position::castlingString() const
+{
+    if (castlingRights == 0)
+        return "-";
+
+    std::string out;
+    const auto append = [&](Color c, CastlingSide s)
+    {
+        if (!(castlingRights & castlingRight(c, s)))
+            return;
+
+        const Square sq = castlingRookSquare[c][s];
+        const Square ksq = kingSquare(c);
+        const bool queenSide = ksq != SQ_NONE ? sq < ksq : s == QUEEN_SIDE;
+
+        Bitboard others = byColor[c] & byType[ROOK] & backRankOf(c) & ~(1ULL << sq);
+        bool outermost = true;
+        for (; others; others &= others - 1)
+        {
+            const Square other = lsb(others);
+            if ((fileOf(other) < fileOf(sq)) == queenSide)
+            {
+                outermost = false;
+                break;
+            }
+        }
+
+        char letter;
+        if (!outermost)
+            letter = static_cast<char>((c == WHITE ? 'A' : 'a') + fileOf(sq));
+        else if (queenSide)
+            letter = c == WHITE ? 'Q' : 'q';
+        else
+            letter = c == WHITE ? 'K' : 'k';
+
+        out += letter;
+    };
+
+    append(WHITE, KING_SIDE);
+    append(WHITE, QUEEN_SIDE);
+    append(BLACK, KING_SIDE);
+    append(BLACK, QUEEN_SIDE);
+
+    return out.empty() ? "-" : out;
 }
 
 void Position::putPiece(Piece piece, Square square)
@@ -192,25 +261,20 @@ bool Position::do_move(Move move)
     const Square to = move.to();
     const Piece piece = board[from];
     const PieceType pt = typeOf(piece);
+    const bool castling = move.isCastling();
 
-    // Castling is illegal if the king is currently in check, passes through
-    // an attacked square, or lands on an attacked square.
-    if (move.isCastling())
-    {
-        const bool kingside = to == SQ_G1 || to == SQ_G8;
-        const Square pass = us == WHITE ? (kingside ? SQ_F1 : SQ_D1)
-                                        : (kingside ? SQ_F8 : SQ_D8);
-        if (movegen::squareAttacked(*this, from, them) ||
-            movegen::squareAttacked(*this, pass, them) ||
-            movegen::squareAttacked(*this, to, them))
-            return false;
-    }
+    // Castling legality is verified here so
+    // that callers which only generate pseudo-legal moves can rely on the
+    // return value. In Chess960 the king and rook may start on any back-rank
+    // file, so this can never be decided from the move alone.
+    if (castling && !movegen::canCastle(*this, move))
+        return false;
 
     // Save state for unmake.
     UndoInfo &undo = undoStack[undoCount];
     undoCount = (undoCount + 1) & (MAX_UNDO - 1);
     undo.movedPiece = piece;
-    undo.capturedPiece = board[to];
+    undo.capturedPiece = castling ? NO_PIECE : board[to];
     undo.prevCastlingRights = castlingRights;
     undo.prevEnPassantSquare = enPassantSquare;
     undo.prevHalfmoveClock = halfmoveClock;
@@ -220,45 +284,55 @@ bool Position::do_move(Move move)
     // Move the piece.
     removePiece(from);
 
-    if (move.isEnPassant())
-    {
-        const Square capSq = static_cast<Square>(to + (us == WHITE ? -8 : 8));
-        undo.capturedPiece = board[capSq];
-        removePiece(capSq);
-    }
-    else if (board[to] != NO_PIECE)
+    if (castling)
     {
         removePiece(to);
+        putPiece(makePiece(us, KING), castlingKingTo(move));
+        putPiece(makePiece(us, ROOK), castlingRookTo(move));
+    }
+    else
+    {
+        if (move.isEnPassant())
+        {
+            const Square capSq = static_cast<Square>(to + (us == WHITE ? -8 : 8));
+            undo.capturedPiece = board[capSq];
+            removePiece(capSq);
+        }
+        else if (board[to] != NO_PIECE)
+        {
+            removePiece(to);
+        }
+
+        putPiece(move.isPromotion() ? makePiece(us, move.promoType()) : piece, to);
     }
 
-    putPiece(move.isPromotion() ? makePiece(us, move.promoType()) : piece, to);
 
-    if (move.isCastling())
+    if (pt == KING)
     {
-        if (to == SQ_G1)
+        castlingRights = static_cast<uint8_t>(
+            castlingRights & ~(castlingRight(us, KING_SIDE) | castlingRight(us, QUEEN_SIDE)));
+    }
+    else if (pt == ROOK)
+    {
+        for (int s = 0; s < CASTLING_SIDE_NB; ++s)
         {
-            removePiece(SQ_H1);
-            putPiece(W_ROOK, SQ_F1);
+            const CastlingSide side = static_cast<CastlingSide>(s);
+            if (from == castlingRookSquare[us][side])
+                castlingRights = static_cast<uint8_t>(castlingRights & ~castlingRight(us, side));
         }
-        else if (to == SQ_C1)
+    }
+
+    if (undo.capturedPiece != NO_PIECE && typeOf(undo.capturedPiece) == ROOK)
+    {
+        for (int s = 0; s < CASTLING_SIDE_NB; ++s)
         {
-            removePiece(SQ_A1);
-            putPiece(W_ROOK, SQ_D1);
-        }
-        else if (to == SQ_G8)
-        {
-            removePiece(SQ_H8);
-            putPiece(B_ROOK, SQ_F8);
-        }
-        else if (to == SQ_C8)
-        {
-            removePiece(SQ_A8);
-            putPiece(B_ROOK, SQ_D8);
+            const CastlingSide side = static_cast<CastlingSide>(s);
+            if (to == castlingRookSquare[them][side])
+                castlingRights = static_cast<uint8_t>(castlingRights & ~castlingRight(them, side));
         }
     }
 
     // Update state.
-    castlingRights = static_cast<uint8_t>(castlingRights & castlingMask[from] & castlingMask[to]);
     enPassantSquare = (pt == PAWN && (from ^ to) == 16) ? static_cast<Square>((from + to) / 2) : SQ_NONE;
 
     if (pt == PAWN || undo.capturedPiece != NO_PIECE)
@@ -282,9 +356,8 @@ bool Position::do_move(Move move)
     historyKeys[historyCount & (MAX_HISTORY - 1)] = zobristKey;
     ++historyCount;
 
-    // Legality: the mover's king must not be attacked after the move.
-    Square ksq = to;
-    if (pt != KING)
+    Square ksq = castling ? castlingKingTo(move) : to;
+    if (!castling && pt != KING)
     {
         const Bitboard k = byType[KING] & byColor[us];
         if (!k)
@@ -326,29 +399,15 @@ void Position::undo_move(Move move)
         --fullmoveNumber;
     sideToMove = us;
 
-    // Revert castling rook move.
     if (move.isCastling())
     {
-        if (to == SQ_G1)
-        {
-            removePiece(SQ_F1);
-            putPiece(W_ROOK, SQ_H1);
-        }
-        else if (to == SQ_C1)
-        {
-            removePiece(SQ_D1);
-            putPiece(W_ROOK, SQ_A1);
-        }
-        else if (to == SQ_G8)
-        {
-            removePiece(SQ_F8);
-            putPiece(B_ROOK, SQ_H8);
-        }
-        else if (to == SQ_C8)
-        {
-            removePiece(SQ_D8);
-            putPiece(B_ROOK, SQ_A8);
-        }
+        // Take king and rook off their castling squares before restoring them
+        // (Chess960: the two may have swapped, or the king may not have moved).
+        removePiece(castlingKingTo(move));
+        removePiece(castlingRookTo(move));
+        putPiece(makePiece(us, KING), from);
+        putPiece(makePiece(us, ROOK), to);
+        return;
     }
 
     // Remove moved piece from destination and restore any captured piece.
@@ -468,28 +527,68 @@ bool Position::set_fen(const std::string &fen)
     else
         return false;
 
-    // 3. Castling rights.
+    // 3. Castling rights. Both the classical letters and the Chess960 file
+    //    letters are accepted: "KQkq" (rook on the outermost file of its side)
+    //    and "HAha" or "GBgb" (Shredder-FEN, the rook's own file).
     if (castlingStr != "-")
     {
         for (char c : castlingStr)
         {
+            Color color;
+            Square rookSq;
+
             switch (c)
             {
             case 'K':
-                castlingRights |= WHITE_OO;
-                break;
             case 'Q':
-                castlingRights |= WHITE_OOO;
-                break;
             case 'k':
-                castlingRights |= BLACK_OO;
-                break;
             case 'q':
-                castlingRights |= BLACK_OOO;
+            {
+                color = (c == 'K' || c == 'Q') ? WHITE : BLACK;
+                const bool queenSide = (c == 'Q' || c == 'q');
+                const Rank homeRank = color == WHITE ? RANK_1 : RANK_8;
+                const Bitboard rooks = byColor[color] & byType[ROOK] & backRankOf(color);
+                const Square ksq = kingSquare(color);
+
+                const Square outer = queenSide ? (rooks ? lsb(rooks) : SQ_NONE)
+                                               : (rooks ? msb(rooks) : SQ_NONE);
+                const bool usable = outer != SQ_NONE && (ksq == SQ_NONE || (queenSide ? outer < ksq : outer > ksq));
+                rookSq = usable ? outer : makeSquare(queenSide ? FILE_A : FILE_H, homeRank);
+                break;
+            }
+            case 'A':
+            case 'B':
+            case 'C':
+            case 'D':
+            case 'E':
+            case 'F':
+            case 'G':
+            case 'H':
+                color = WHITE;
+                rookSq = makeSquare(static_cast<File>(c - 'A'), RANK_1);
+                break;
+            case 'a':
+            case 'b':
+            case 'c':
+            case 'd':
+            case 'e':
+            case 'f':
+            case 'g':
+            case 'h':
+                color = BLACK;
+                rookSq = makeSquare(static_cast<File>(c - 'a'), RANK_8);
                 break;
             default:
                 return false;
             }
+
+            // The rook castles towards the king side when it starts right of
+            // the king; that - not the letter itself - picks the right.
+            const Square ksq = kingSquare(color);
+            const CastlingSide side = (ksq != SQ_NONE && rookSq < ksq) ? QUEEN_SIDE : KING_SIDE;
+
+            castlingRights |= castlingRight(color, side);
+            castlingRookSquare[color][side] = rookSq;
         }
     }
 
@@ -564,20 +663,7 @@ std::string Position::fen() const
     }
 
     fen += sideToMove == WHITE ? " w " : " b ";
-
-    if (castlingRights == 0)
-        fen += '-';
-    else
-    {
-        if (castlingRights & WHITE_OO)
-            fen += 'K';
-        if (castlingRights & WHITE_OOO)
-            fen += 'Q';
-        if (castlingRights & BLACK_OO)
-            fen += 'k';
-        if (castlingRights & BLACK_OOO)
-            fen += 'q';
-    }
+    fen += castlingString();
 
     if (enPassantSquare == SQ_NONE)
         fen += " - ";
@@ -613,17 +699,7 @@ void Position::print_board() const
     std::cout << "    a   b   c   d   e   f   g   h\n\n";
 
     std::cout << "Side to move: " << (sideToMove == WHITE ? "white" : "black") << '\n';
-
-    std::string castling;
-    if (castlingRights & WHITE_OO)
-        castling += 'K';
-    if (castlingRights & WHITE_OOO)
-        castling += 'Q';
-    if (castlingRights & BLACK_OO)
-        castling += 'k';
-    if (castlingRights & BLACK_OOO)
-        castling += 'q';
-    std::cout << "Castling: " << (castling.empty() ? "-" : castling) << '\n';
+    std::cout << "Castling: " << castlingString() << '\n';
 
     if (enPassantSquare == SQ_NONE)
         std::cout << "En passant: -\n";

@@ -15,6 +15,20 @@ enum CastlingRight : uint8_t
     BLACK_OOO = 1 << 3
 };
 
+// Which side the king castles to
+enum CastlingSide : int
+{
+    KING_SIDE,
+    QUEEN_SIDE,
+    CASTLING_SIDE_NB = 2
+};
+
+// Right flag that allows color 'c' to castle towards 's'.
+constexpr uint8_t castlingRight(Color c, CastlingSide s)
+{
+    return static_cast<uint8_t>(static_cast<uint8_t>(c == WHITE ? WHITE_OO : BLACK_OO) << s);
+}
+
 // Decompose a Piece into its Color and PieceType components.
 constexpr Color colorOf(Piece p)
 {
@@ -68,6 +82,11 @@ public:
     Square enPassantSquare = SQ_NONE;
     int halfmoveClock = 0;
     int fullmoveNumber = 1;
+
+    std::array<std::array<Square, CASTLING_SIDE_NB>, COLOR_NB> castlingRookSquare{};
+
+    Square kingSquare(Color c) const;
+    std::string castlingString() const;
 
     // Incrementally maintained Zobrist hash of the position.
     uint64_t zobristKey = 0;

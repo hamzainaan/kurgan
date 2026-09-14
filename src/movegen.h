@@ -46,6 +46,26 @@ struct Move
     constexpr bool operator!=(Move m) const { return data != m.data; }
 };
 
+constexpr bool isKingSideCastling(Move m)
+{
+    return m.to() > m.from();
+}
+
+constexpr Square castlingKingTo(Move m)
+{
+    return makeSquare(isKingSideCastling(m) ? FILE_G : FILE_C, rankOf(m.from()));
+}
+
+constexpr Square castlingRookTo(Move m)
+{
+    return makeSquare(isKingSideCastling(m) ? FILE_F : FILE_D, rankOf(m.from()));
+}
+
+constexpr Square moveTarget(Move m)
+{
+    return m.isCastling() ? castlingKingTo(m) : m.to();
+}
+
 // Fixed-capacity stack buffer of generated moves.
 struct MoveList
 {
@@ -72,6 +92,12 @@ namespace movegen
 {
     // Build all attack tables. Must be called once before any generation.
     void init();
+    
+    void setChess960(bool enabled);
+    bool chess960();
+
+    // True if 'move' (king-from -> rook-from) is a legal castling move in 'pos'.
+    bool canCastle(const Position &pos, Move move);
 
     // Attack bitboard for a non-pawn piece type from a square, given occupancy.
     Bitboard attacks(PieceType pt, Square sq, Bitboard occupied);
