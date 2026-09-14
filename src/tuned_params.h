@@ -167,7 +167,7 @@ inline int RFP_DEPTH = 7;
 inline int RFP_MARGIN = 80;
 
 // Child-node futility pruning.
-inline int FUTILITY_DEPTH = 1;
+inline int FUTILITY_DEPTH = 0;
 inline int FUTILITY_MARGIN = 120;
 
 // Move-level futility pruning.
