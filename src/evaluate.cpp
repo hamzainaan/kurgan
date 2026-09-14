@@ -187,6 +187,31 @@ namespace
         mg -= tuned::MG_ISOLATED * isolated + tuned::MG_DOUBLED * doubled;
         eg -= tuned::EG_ISOLATED * isolated + tuned::EG_DOUBLED * doubled;
     }
+
+    void imbalanceScore(const int counts[COLOR_NB][PIECE_TYPE_NB], Color us, int &mg, int &eg)
+    {
+        const Color them = static_cast<Color>(us ^ 1);
+        const int *ownCounts = counts[us];
+        const int *theirCounts = counts[them];
+
+        for (int own = KNIGHT; own <= QUEEN; ++own)
+        {
+            const int ownCount = ownCounts[own];
+            if (ownCount == 0)
+                continue;
+
+            for (int opp = PAWN; opp < own; ++opp)
+            {
+                const int theirCount = theirCounts[opp];
+                if (theirCount == 0)
+                    continue;
+
+                const int pairs = ownCount * theirCount;
+                mg += pairs * tuned::MG_IMBALANCE[own][opp];
+                eg += pairs * tuned::EG_IMBALANCE[own][opp];
+            }
+        }
+    }
 }
 
 int evaluate::evaluate(const Position &pos)
@@ -214,12 +239,20 @@ int evaluate::evaluate(const Position &pos)
 
     // Per-square terms, resolved separately for both phases.
     const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
+
+    // Piece counts, consumed only by the material-imbalance term.
+    int counts[COLOR_NB][PIECE_TYPE_NB] = {};
+    for (int c = WHITE; c <= BLACK; ++c)
+        for (int pt = PAWN; pt <= QUEEN; ++pt)
+            counts[c][pt] = popCount(pos.byColor[c] & pos.byType[pt]);
+
     for (int c = WHITE; c <= BLACK; ++c)
     {
         const Color color = static_cast<Color>(c);
         mobilityScore(pos, color, occ, mg[c], eg[c]);
         outpostScore(pos, color, mg[c], eg[c]);
         pawnStructureScore(pos, color, mg[c], eg[c]);
+        imbalanceScore(counts, color, mg[c], eg[c]);
     }
 
     // Game phase: 0 (endgame) .. 24 (midgame).
