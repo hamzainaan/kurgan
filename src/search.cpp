@@ -110,6 +110,7 @@ namespace
     thread_local std::vector<Move> excludedRootMoves;
     thread_local Move killers[2][MAX_PLY];
     thread_local int history[COLOR_NB][SQUARE_NB][SQUARE_NB];
+    thread_local int captureHistory[PIECE_NB][SQUARE_NB][PIECE_TYPE_NB];
     thread_local Move counterMoves[COLOR_NB][SQUARE_NB][SQUARE_NB];
     thread_local Move moveStack[MAX_PLY + 2];
     thread_local Move pvTable[MAX_PLY][MAX_PLY];
@@ -338,62 +339,141 @@ namespace
         return tt[key & ttMask];
     }
 
-    int mvvLva(const Position &pos, Move m)
+    bool isTactical(const Position &pos, Move m)
     {
-        const Color them = static_cast<Color>(pos.sideToMove ^ 1);
-        const Piece victim = m.isEnPassant() ? makePiece(them, PAWN) : pos.board[m.to()];
-        const Piece attacker = pos.board[m.from()];
-        int score = pieceValue(typeOf(victim)) * 10 - pieceValue(typeOf(attacker));
+        return m.isPromotion() || m.isEnPassant() || pos.board[m.to()] != NO_PIECE;
+    }
+
+    // The captured piece, treating en passant as capturing a pawn.
+    Piece victimOf(const Position &pos, Move m)
+    {
+        return m.isEnPassant() ? makePiece(static_cast<Color>(pos.sideToMove ^ 1), PAWN)
+                               : pos.board[m.to()];
+    }
+    int &captureHistoryEntry(const Position &pos, Move m)
+    {
+        return captureHistory[pos.board[m.from()]][m.to()][typeOf(victimOf(pos, m))];
+    }
+    int captureScore(const Position &pos, Move m)
+    {
+        int score = pieceValue(typeOf(victimOf(pos, m))) * 32 + captureHistoryEntry(pos, m) / 16;
         if (m.isPromotion())
-            score += pieceValue(m.promoType());
+            score += pieceValue(m.promoType()) * 32;
         return score;
+    }
+
+    // History entries are bounded to [-HISTORY_MAX, HISTORY_MAX].
+    constexpr int HISTORY_MAX = 16384;
+
+    void updateHistory(int &h, int bonus)
+    {
+        bonus = std::clamp(bonus, -HISTORY_MAX, HISTORY_MAX);
+        const int magnitude = bonus < 0 ? -bonus : bonus;
+        h += bonus - h * magnitude / HISTORY_MAX;
     }
 
     struct ScoredMove
     {
-        Move move;
         int score;
+        Move move;
+        uint16_t order = 0; // generation index, used as a stable tie-break
     };
 
-    void orderMoves(const Position &pos, const MoveList &list, ScoredMove *out, int &count,
-                    Move ttMove, Move counterMove, int ply, bool capturesOnly)
+    constexpr int TT_MOVE_SCORE = 10000000;
+    constexpr int CAPTURE_BAND = 6000000;
+    constexpr int KILLER1_SCORE = 5000000;
+    constexpr int KILLER2_SCORE = 4900000;
+    constexpr int COUNTERMOVE_SCORE = 4800000;
+
+    struct MovePicker
     {
-        const Color us = pos.sideToMove;
-        count = 0;
-        for (int i = 0; i < list.size; ++i)
+        ScoredMove moves[MoveList::MAX_MOVES];
+        Move deferred[MoveList::MAX_MOVES];
+        int count = 0;
+        int index = 0;
+        int deferredCount = 0;
+        int deferredIndex = 0;
+        Move ttMove;
+        int lastSee = 0;          // SEE of the move returned by the last next()
+        bool lastSeeValid = false; // false when SEE was not evaluated for it
+
+        void init(const Position &pos, const MoveList &list, Move ttBest, Move counterMove,
+                  int ply, bool capturesOnly)
         {
-            const Move m = list.moves[i];
-            const bool tactical = m.isPromotion() || m.isEnPassant() || pos.board[m.to()] != NO_PIECE;
-            if (capturesOnly && !tactical)
-                continue;
+            const Color us = pos.sideToMove;
+            ttMove = ttBest;
+            count = 0;
+            index = 0;
+            deferredCount = 0;
+            deferredIndex = 0;
 
-            int score;
-            if (m == ttMove)
-                score = 10000000;
-            else if (tactical)
+            for (int i = 0; i < list.size; ++i)
             {
-                const int lva = mvvLva(pos, m);
-                // Losing exchanges rank below every quiet move. Quiescence
-                // SEE-prunes them anyway, so only pay for SEE outside of it.
-                if (!capturesOnly && see::evaluate(pos, m) < 0)
-                    score = -1000000 + lva;
-                else
-                    score = 6000000 + lva;
-            }
-            else if (m == killers[0][ply])
-                score = 5000000;
-            else if (m == killers[1][ply])
-                score = 4900000;
-            else if (m == counterMove)
-                score = 4800000;
-            else
-                score = history[us][m.from()][m.to()];
+                const Move m = list.moves[i];
+                const bool tactical = isTactical(pos, m);
+                if (capturesOnly && !tactical)
+                    continue;
 
-            out[count++] = {m, score};
+                int score;
+                if (m == ttMove)
+                    score = TT_MOVE_SCORE;
+                else if (tactical)
+                    score = CAPTURE_BAND + captureScore(pos, m);
+                else if (m == killers[0][ply])
+                    score = KILLER1_SCORE;
+                else if (m == killers[1][ply])
+                    score = KILLER2_SCORE;
+                else if (m == counterMove)
+                    score = COUNTERMOVE_SCORE;
+                else
+                    score = history[us][m.from()][m.to()];
+
+                moves[count++] = {score, m, static_cast<uint16_t>(count)};
+            }
+
+
+            std::sort(moves, moves + count, [](const ScoredMove &a, const ScoredMove &b)
+                      {
+                          if (a.score != b.score)
+                              return a.score > b.score;
+                          return a.order < b.order;
+                      });
         }
-        std::sort(out, out + count, [](const ScoredMove &a, const ScoredMove &b)
-                  { return a.score > b.score; });
-    }
+
+        // Next move to search, or Move() when the node is exhausted.
+        Move next(const Position &pos)
+        {
+            while (index < count)
+            {
+                const Move m = moves[index++].move;
+                lastSeeValid = false;
+
+                if (m == ttMove || !isTactical(pos, m))
+                    return m;
+
+                lastSee = see::evaluate(pos, m);
+                lastSeeValid = true;
+                if (lastSee < 0)
+                {
+                    deferred[deferredCount++] = m;
+                    continue;
+                }
+                return m;
+            }
+
+            if (deferredIndex < deferredCount)
+            {
+                // Every deferred move was rejected by SEE, so the score is
+                // known to be negative without re-running the evaluation.
+                lastSee = -1;
+                lastSeeValid = true;
+                return deferred[deferredIndex++];
+            }
+
+            lastSeeValid = false;
+            return Move();
+        }
+    };
 
     bool isExcludedRootMove(Move m)
     {
@@ -452,16 +532,15 @@ namespace
         MoveList list;
         movegen::generate_pseudo_legal_moves(pos, list);
 
-        ScoredMove scored[MoveList::MAX_MOVES];
-        int count = 0;
-        orderMoves(pos, list, scored, count, Move(), 0, false);
+        MovePicker picker;
+        picker.init(pos, list, Move(), Move(), 0, false);
 
-        const int limit = std::min(count, depth);
+        const int limit = std::min(picker.count, depth);
 
         std::lock_guard<std::mutex> lock(outputMutex);
         std::cout << "info depth " << depth;
         for (int i = 0; i < limit; ++i)
-            std::cout << " currmove " << moveToUci(scored[i].move);
+            std::cout << " currmove " << moveToUci(picker.moves[i].move);
         std::cout << std::endl;
     }
     */
@@ -644,17 +723,21 @@ namespace
         MoveList list;
         movegen::generate_pseudo_legal_moves(pos, list);
 
-        ScoredMove scored[MoveList::MAX_MOVES];
-        int count = 0;
-        orderMoves(pos, list, scored, count, ttMove, counter, ply, false);
+        MovePicker picker;
+        picker.init(pos, list, ttMove, counter, ply, false);
 
         Move bestMove;
         int bestScore = -INF;
         int legalMoves = 0;
 
-        for (int i = 0; i < count; ++i)
+
+        Move searchedQuiets[MoveList::MAX_MOVES];
+        int searchedQuietCount = 0;
+        Move searchedCaptures[MoveList::MAX_MOVES];
+        int searchedCaptureCount = 0;
+
+        for (Move m = picker.next(pos); m != Move(); m = picker.next(pos))
         {
-            const Move m = scored[i].move;
             const bool quiet = !m.isPromotion() && !m.isEnPassant() && !m.isCastling() && pos.board[m.to()] == NO_PIECE;
 
             // Move-Level Futility Pruning: skip quiet moves that cannot raise
@@ -676,6 +759,10 @@ namespace
 
             moveStack[ply + 1] = m;
             ++legalMoves;
+            if (quiet)
+                searchedQuiets[searchedQuietCount++] = m;
+            else if (!m.isCastling())
+                searchedCaptures[searchedCaptureCount++] = m;
 
             int score;
             if (legalMoves == 1)
@@ -731,9 +818,18 @@ namespace
                                 killers[1][ply] = killers[0][ply];
                                 killers[0][ply] = m;
                             }
-                            history[us][m.from()][m.to()] += depth * depth;
-                            if (history[us][m.from()][m.to()] > 16384)
-                                history[us][m.from()][m.to()] = 16384;
+
+                            const int bonus = depth * depth;
+                            updateHistory(history[us][m.from()][m.to()], bonus);
+                            for (int k = 0; k < searchedQuietCount - 1; ++k)
+                                updateHistory(history[us][searchedQuiets[k].from()][searchedQuiets[k].to()], -bonus);
+                        }
+                        else
+                        {
+                            const int bonus = depth * depth;
+                            updateHistory(captureHistoryEntry(pos, m), bonus);
+                            for (int k = 0; k < searchedCaptureCount - 1; ++k)
+                                updateHistory(captureHistoryEntry(pos, searchedCaptures[k]), -bonus);
                         }
                         break;
                     }
@@ -804,18 +900,18 @@ namespace
         MoveList list;
         movegen::generate_pseudo_legal_moves(pos, list);
 
-        ScoredMove scored[MoveList::MAX_MOVES];
-        int count = 0;
-        orderMoves(pos, list, scored, count, Move(), counter, ply, !inCheck);
+        MovePicker picker;
+        picker.init(pos, list, Move(), counter, ply, !inCheck);
 
         int legalMoves = 0;
-        for (int i = 0; i < count; ++i)
+        for (Move m = picker.next(pos); m != Move(); m = picker.next(pos))
         {
-            const Move m = scored[i].move;
-
-            // SEE-Based Capture Pruning: skip losing exchanges when not in check.
-            if (!inCheck && see::evaluate(pos, m) < 0)
-                continue;
+            if (!inCheck)
+            {
+                const int seeScore = picker.lastSeeValid ? picker.lastSee : see::evaluate(pos, m);
+                if (seeScore < 0)
+                    continue;
+            }
 
             if (!pos.do_move(m))
                 continue;
@@ -889,6 +985,7 @@ namespace
         seldepth = 0;
         std::memset(killers, 0, sizeof(killers));
         std::memset(history, 0, sizeof(history));
+        std::memset(captureHistory, 0, sizeof(captureHistory));
         std::memset(counterMoves, 0, sizeof(counterMoves));
         std::fill(moveStack, moveStack + MAX_PLY + 2, Move());
         std::memset(pvTable, 0, sizeof(pvTable));
