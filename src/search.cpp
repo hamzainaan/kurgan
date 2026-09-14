@@ -110,6 +110,8 @@ namespace
     thread_local std::vector<Move> excludedRootMoves;
     thread_local Move killers[2][MAX_PLY];
     thread_local int history[COLOR_NB][SQUARE_NB][SQUARE_NB];
+    thread_local Move counterMoves[COLOR_NB][SQUARE_NB][SQUARE_NB];
+    thread_local Move moveStack[MAX_PLY + 2];
     thread_local Move pvTable[MAX_PLY][MAX_PLY];
     thread_local int pvLength[MAX_PLY];
     thread_local uint64_t ttFilledLocal = 0;
@@ -354,7 +356,7 @@ namespace
     };
 
     void orderMoves(const Position &pos, const MoveList &list, ScoredMove *out, int &count,
-                    Move ttMove, int ply, bool capturesOnly)
+                    Move ttMove, Move counterMove, int ply, bool capturesOnly)
     {
         const Color us = pos.sideToMove;
         count = 0;
@@ -365,15 +367,25 @@ namespace
             if (capturesOnly && !tactical)
                 continue;
 
-            int score = 0;
+            int score;
             if (m == ttMove)
                 score = 10000000;
             else if (tactical)
-                score = 1000000 + mvvLva(pos, m);
+            {
+                const int lva = mvvLva(pos, m);
+                // Losing exchanges rank below every quiet move. Quiescence
+                // SEE-prunes them anyway, so only pay for SEE outside of it.
+                if (!capturesOnly && see::evaluate(pos, m) < 0)
+                    score = -1000000 + lva;
+                else
+                    score = 6000000 + lva;
+            }
             else if (m == killers[0][ply])
-                score = 900000;
+                score = 5000000;
             else if (m == killers[1][ply])
-                score = 800000;
+                score = 4900000;
+            else if (m == counterMove)
+                score = 4800000;
             else
                 score = history[us][m.from()][m.to()];
 
@@ -530,6 +542,9 @@ namespace
         const int originalAlpha = alpha;
         const uint64_t key = pos.zobristKey;
 
+        const Move prevMove = moveStack[ply];
+        const Move counter = prevMove == Move() ? Move() : counterMoves[us][prevMove.from()][prevMove.to()];
+
         // Deterministic draws are cached in the transposition table.
         if (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos))
         {
@@ -598,6 +613,7 @@ namespace
             R = std::min(R, depth - 1);
 
             // Null move search.
+            moveStack[ply + 1] = Move();
             pos.do_null_move();
             const int nullScore = -alphaBeta(pos, depth - 1 - R, -beta, -beta + 1, ply + 1, false);
             pos.undo_null_move();
@@ -630,7 +646,7 @@ namespace
 
         ScoredMove scored[MoveList::MAX_MOVES];
         int count = 0;
-        orderMoves(pos, list, scored, count, ttMove, ply, false);
+        orderMoves(pos, list, scored, count, ttMove, counter, ply, false);
 
         Move bestMove;
         int bestScore = -INF;
@@ -658,6 +674,7 @@ namespace
             if (!pos.do_move(m))
                 continue;
 
+            moveStack[ply + 1] = m;
             ++legalMoves;
 
             int score;
@@ -706,6 +723,9 @@ namespace
                     {
                         if (quiet)
                         {
+                            if (prevMove != Move())
+                                counterMoves[us][prevMove.from()][prevMove.to()] = m;
+
                             if (killers[0][ply] != m)
                             {
                                 killers[1][ply] = killers[0][ply];
@@ -766,6 +786,9 @@ namespace
         const Square ksq = kingSquare(pos, us);
         const bool inCheck = ksq != SQ_NONE && movegen::squareAttacked(pos, ksq, them);
 
+        const Move prevMove = moveStack[ply];
+        const Move counter = prevMove == Move() ? Move() : counterMoves[us][prevMove.from()][prevMove.to()];
+
         if (pos.halfmoveClock >= 100 || pos.isRepetition(ply) || isInsufficientMaterial(pos))
             return 0;
 
@@ -783,7 +806,7 @@ namespace
 
         ScoredMove scored[MoveList::MAX_MOVES];
         int count = 0;
-        orderMoves(pos, list, scored, count, Move(), ply, !inCheck);
+        orderMoves(pos, list, scored, count, Move(), counter, ply, !inCheck);
 
         int legalMoves = 0;
         for (int i = 0; i < count; ++i)
@@ -797,6 +820,7 @@ namespace
             if (!pos.do_move(m))
                 continue;
 
+            moveStack[ply + 1] = m;
             ++legalMoves;
             const int score = -quiescence(pos, -beta, -alpha, ply + 1);
             pos.undo_move(m);
@@ -865,6 +889,8 @@ namespace
         seldepth = 0;
         std::memset(killers, 0, sizeof(killers));
         std::memset(history, 0, sizeof(history));
+        std::memset(counterMoves, 0, sizeof(counterMoves));
+        std::fill(moveStack, moveStack + MAX_PLY + 2, Move());
         std::memset(pvTable, 0, sizeof(pvTable));
         std::memset(pvLength, 0, sizeof(pvLength));
         excludedRootMoves.clear();
