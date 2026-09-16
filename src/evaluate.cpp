@@ -29,6 +29,7 @@ namespace
     constexpr Bitboard KSIDE_BB = QSIDE_BB << 4;
     constexpr Bitboard CENTER_FILES_BB = FILE_C_BB | FILE_D_BB | FILE_E_BB | FILE_F_BB;
     constexpr Bitboard HALF_BB[COLOR_NB] = {0x00000000FFFFFFFFULL, 0xFFFFFFFF00000000ULL};
+    constexpr Bitboard LIGHT_SQ_BB = 0x55AA55AA55AA55AAULL;
 
     // King safety zones, indexed by the colour that owns the king.
     constexpr Bitboard KING_ZONE_DEFENDER[COLOR_NB] = {
@@ -107,9 +108,59 @@ namespace
         return c == WHITE ? (7 - rank) * 8 + file : rank * 8 + file;
     }
 
+    int relativeRank(Color c, int rank)
+    {
+        return rank ^ (7 * c);
+    }
+
+    Bitboard ranksAhead(Color c, int rank)
+    {
+        Bitboard m = 0;
+        if (c == WHITE)
+        {
+            for (int r = rank + 1; r < 8; ++r)
+                m |= rankMask(r);
+        }
+        else
+            for (int r = 0; r < rank; ++r)
+                m |= rankMask(r);
+        return m;
+    }
+
+    Bitboard passedPawnsOf(const Position &pos, Color c)
+    {
+        const Color them = static_cast<Color>(c ^ 1);
+        const Bitboard enemyPawns = pos.byColor[them] & pos.byType[PAWN];
+        Bitboard passed = 0;
+        Bitboard b = pos.byColor[c] & pos.byType[PAWN];
+        while (b)
+        {
+            const Square sq = popLsb(b);
+            const int file = sq & 7;
+            const Bitboard passFiles = fileMask(file - 1) | fileMask(file) | fileMask(file + 1);
+            if (!(enemyPawns & ranksAhead(c, sq >> 3) & passFiles))
+                passed |= 1ULL << sq;
+        }
+        return passed;
+    }
+
     // Piece-type order used by the per-square evaluation terms.
     constexpr PieceType mobilityTypes[4] = {KNIGHT, BISHOP, ROOK, QUEEN};
     constexpr PieceType outpostTypes[2] = {KNIGHT, BISHOP};
+
+    // Feature layout of tuned::MG_MINOR / tuned::MG_ROOK, shared with the
+    // featuriser in tuner/minor_piece.py and tuner/rook.py.
+    constexpr int MINOR_BISHOP_PAIR = 0;
+    constexpr int MINOR_BISHOP_PAWNS = 1;
+    constexpr int MINOR_KNIGHT_RIM = 10;
+    constexpr int ROOK_OPEN_FILE = 0;
+    constexpr int ROOK_SEMI_OPEN_FILE = 1;
+    constexpr int ROOK_ON_7TH = 2;
+    constexpr int ROOK_ON_2ND = 3;
+    constexpr int ROOK_BEHIND_OWN_PASSER = 4;
+    constexpr int ROOK_BEHIND_ENEMY_PASSER = 5;
+    constexpr int ROOK_CONNECTED = 6;
+    constexpr int ROOK_TRAPPED = 7;
 
     // Per-piece attack sets, plus the unions the king-safety term needs. Laser
     // iterates pieces (not piece types) so that two pieces of the same type both
@@ -194,15 +245,7 @@ namespace
 
                 // Reject if an enemy pawn on an adjacent file can still reach
                 // a square from which it would attack this one.
-                Bitboard ahead = 0;
-                if (c == WHITE)
-                    for (int r = rank + 1; r < 8; ++r)
-                        ahead |= rankMask(r);
-                else
-                    for (int r = 0; r < rank; ++r)
-                        ahead |= rankMask(r);
-
-                if (enemyPawns & (fileMask(file - 1) | fileMask(file + 1)) & ahead)
+                if (enemyPawns & (fileMask(file - 1) | fileMask(file + 1)) & ranksAhead(c, rank))
                     continue;
 
                 mg += tuned::MG_OUTPOST[i];
@@ -211,11 +254,10 @@ namespace
         }
     }
 
-    void pawnStructureScore(const Position &pos, Color c, int &mg, int &eg)
+    void pawnStructureScore(const Position &pos, const Bitboard passed[COLOR_NB], Color c,
+                            int &mg, int &eg)
     {
-        const Color them = static_cast<Color>(c ^ 1);
         const Bitboard pawns = pos.byColor[c] & pos.byType[PAWN];
-        const Bitboard enemyPawns = pos.byColor[them] & pos.byType[PAWN];
 
         int isolated = 0;
         int doubled = 0;
@@ -230,16 +272,7 @@ namespace
             if (!(pawns & (fileMask(file - 1) | fileMask(file + 1))))
                 ++isolated;
 
-            Bitboard ahead = 0;
-            if (c == WHITE)
-                for (int r = rank + 1; r < 8; ++r)
-                    ahead |= rankMask(r);
-            else
-                for (int r = 0; r < rank; ++r)
-                    ahead |= rankMask(r);
-
-            const Bitboard passFiles = fileMask(file - 1) | fileMask(file) | fileMask(file + 1);
-            if (!(enemyPawns & ahead & passFiles))
+            if (passed[c] & (1ULL << sq))
             {
                 const int bucket = (c == WHITE) ? rank : 7 - rank;
                 mg += tuned::MG_PASSED[bucket];
@@ -256,6 +289,114 @@ namespace
 
         mg -= tuned::MG_ISOLATED * isolated + tuned::MG_DOUBLED * doubled;
         eg -= tuned::EG_ISOLATED * isolated + tuned::EG_DOUBLED * doubled;
+    }
+
+    void minorPieceScore(const Position &pos, const int counts[COLOR_NB][PIECE_TYPE_NB], Color c,
+                         int &mg, int &eg)
+    {
+        const Bitboard ownPawns = pos.byColor[c] & pos.byType[PAWN];
+
+        if (counts[c][BISHOP] >= 2)
+        {
+            mg += tuned::MG_MINOR[MINOR_BISHOP_PAIR];
+            eg += tuned::EG_MINOR[MINOR_BISHOP_PAIR];
+        }
+
+        Bitboard b = pos.byColor[c] & pos.byType[BISHOP];
+        while (b)
+        {
+            const Square sq = popLsb(b);
+            const Bitboard sameColor =
+                ((((sq & 7) + (sq >> 3)) & 1) != 0) ? LIGHT_SQ_BB : ~LIGHT_SQ_BB;
+            const int blocked = popCount(ownPawns & sameColor);
+            mg += tuned::MG_MINOR[MINOR_BISHOP_PAWNS + blocked];
+            eg += tuned::EG_MINOR[MINOR_BISHOP_PAWNS + blocked];
+        }
+
+        b = pos.byColor[c] & pos.byType[KNIGHT];
+        while (b)
+        {
+            const Square sq = popLsb(b);
+            const int file = sq & 7;
+            if (file == 0 || file == 7)
+            {
+                mg += tuned::MG_MINOR[MINOR_KNIGHT_RIM];
+                eg += tuned::EG_MINOR[MINOR_KNIGHT_RIM];
+            }
+        }
+    }
+
+    void rookScore(const Position &pos, const Bitboard passed[COLOR_NB], Color c, Bitboard occ,
+                   int &mg, int &eg)
+    {
+        const Color them = static_cast<Color>(c ^ 1);
+        const Bitboard ownPawns = pos.byColor[c] & pos.byType[PAWN];
+        const Bitboard enemyPawns = pos.byColor[them] & pos.byType[PAWN];
+        const Bitboard allPawns = ownPawns | enemyPawns;
+        const Bitboard ownRooks = pos.byColor[c] & pos.byType[ROOK];
+        const Bitboard theirKing = pos.byColor[them] & pos.byType[KING];
+        const Bitboard theirBackRank = rankMask(relativeRank(c, 7));
+        const Bitboard theirSeventhRank = rankMask(relativeRank(c, 6));
+
+        Bitboard b = ownRooks;
+        while (b)
+        {
+            const Square sq = popLsb(b);
+            const int file = sq & 7;
+            const int rank = sq >> 3;
+            const int relRank = relativeRank(c, rank);
+            const Bitboard onFile = allPawns & fileMask(file);
+            const Bitboard attacks = movegen::attacks(ROOK, sq, occ);
+
+            if (!onFile)
+            {
+                mg += tuned::MG_ROOK[ROOK_OPEN_FILE];
+                eg += tuned::EG_ROOK[ROOK_OPEN_FILE];
+            }
+            else if (!(onFile & ownPawns))
+            {
+                mg += tuned::MG_ROOK[ROOK_SEMI_OPEN_FILE];
+                eg += tuned::EG_ROOK[ROOK_SEMI_OPEN_FILE];
+            }
+
+            // The 7th is worth most when it cuts the king off or eats pawns.
+            if (relRank == 6 && ((theirKing & theirBackRank) || (enemyPawns & theirSeventhRank)))
+            {
+                mg += tuned::MG_ROOK[ROOK_ON_7TH];
+                eg += tuned::EG_ROOK[ROOK_ON_7TH];
+            }
+
+            if (relRank == 1)
+            {
+                mg += tuned::MG_ROOK[ROOK_ON_2ND];
+                eg += tuned::EG_ROOK[ROOK_ON_2ND];
+            }
+
+            // Rook behind one of our own passers, and behind one of theirs.
+            if (passed[c] & fileMask(file) & ranksAhead(c, rank))
+            {
+                mg += tuned::MG_ROOK[ROOK_BEHIND_OWN_PASSER];
+                eg += tuned::EG_ROOK[ROOK_BEHIND_OWN_PASSER];
+            }
+
+            if (passed[them] & fileMask(file) & ranksAhead(them, rank))
+            {
+                mg += tuned::MG_ROOK[ROOK_BEHIND_ENEMY_PASSER];
+                eg += tuned::EG_ROOK[ROOK_BEHIND_ENEMY_PASSER];
+            }
+
+            if (attacks & ownRooks)
+            {
+                mg += tuned::MG_ROOK[ROOK_CONNECTED];
+                eg += tuned::EG_ROOK[ROOK_CONNECTED];
+            }
+
+            if (relRank == 0 && !(attacks & ~pos.byColor[c]))
+            {
+                mg += tuned::MG_ROOK[ROOK_TRAPPED];
+                eg += tuned::EG_ROOK[ROOK_TRAPPED];
+            }
+        }
     }
 
     void imbalanceScore(const int counts[COLOR_NB][PIECE_TYPE_NB], Color us, int &mg, int &eg)
@@ -281,11 +422,6 @@ namespace
                 eg += pairs * tuned::EG_IMBALANCE[own][opp];
             }
         }
-    }
-
-    int relativeRank(Color c, int rank)
-    {
-        return rank ^ (7 * c);
     }
 
     Square lsbSquare(Bitboard b)
@@ -514,12 +650,18 @@ int evaluate::evaluate(const Position &pos)
     for (int c = WHITE; c <= BLACK; ++c)
         ai.byType[c][PAWN] = pawnAttackMap(static_cast<Color>(c), pos.byColor[c] & pos.byType[PAWN]);
 
+    Bitboard passed[COLOR_NB];
+    for (int c = WHITE; c <= BLACK; ++c)
+        passed[c] = passedPawnsOf(pos, static_cast<Color>(c));
+
     for (int c = WHITE; c <= BLACK; ++c)
     {
         const Color color = static_cast<Color>(c);
         mobilityScore(pos, color, occ, mg[c], eg[c], ai);
         outpostScore(pos, color, mg[c], eg[c]);
-        pawnStructureScore(pos, color, mg[c], eg[c]);
+        pawnStructureScore(pos, passed, color, mg[c], eg[c]);
+        minorPieceScore(pos, counts, color, mg[c], eg[c]);
+        rookScore(pos, passed, color, occ, mg[c], eg[c]);
         imbalanceScore(counts, color, mg[c], eg[c]);
     }
 
