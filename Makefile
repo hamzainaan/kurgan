@@ -7,6 +7,7 @@ ENGINE   := kurgan
 CXX      ?= g++
 CXXFLAGS ?=
 
+MODE      ?= release
 SRC_DIR   := src
 BUILD_DIR := build
 OBJ_DIR   := $(BUILD_DIR)/obj/$(MODE)
@@ -45,8 +46,6 @@ endif
 # ------------------------------------------------------------------
 # Build modes
 # ------------------------------------------------------------------
-MODE ?= release
-
 ifeq ($(COMPILER),msvc)
   EXE      := $(ENGINE).exe
   CPPFLAGS := /I$(SRC_DIR) /nologo /EHsc
