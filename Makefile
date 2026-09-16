@@ -1,3 +1,8 @@
+JOBS ?= $(or $(NUMBER_OF_PROCESSORS),$(shell nproc 2>/dev/null),$(shell sysctl -n hw.ncpu 2>/dev/null),4)
+ifeq ($(filter -j% --jobs=%,$(MAKEFLAGS)),)
+  MAKEFLAGS += -j$(JOBS)
+endif
+
 ENGINE   := kurgan
 CXX      ?= g++
 CXXFLAGS ?=
