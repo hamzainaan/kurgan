@@ -77,18 +77,37 @@ else
   CPPFLAGS := -I$(SRC_DIR)
   CXXSTD   := -std=c++23
   WARNINGS := -Wall -Wextra -Wshadow -Wconversion
-  NATIVE   ?= -march=native
+  LTO      ?= -flto
   MKDIR    := mkdir -p
   DEPS     := $(OBJS:.o=.d)
 
+  TIER ?= native
+  ifeq ($(TIER),native)
+    ARCHFLAGS := -march=native
+  else ifeq ($(TIER),baseline)
+    ARCHFLAGS :=
+  else ifeq ($(TIER),sse42)
+    ARCHFLAGS := -march=x86-64-v2
+  else ifeq ($(TIER),avx2)
+    ARCHFLAGS := -march=x86-64-v3
+  else ifeq ($(TIER),avx512)
+    ARCHFLAGS := -march=x86-64-v4
+  else ifeq ($(TIER),neoverse)
+    ARCHFLAGS := -mcpu=neoverse-n1
+  else ifeq ($(TIER),apple)
+    ARCHFLAGS := -mcpu=apple-m1
+  else
+    $(error Unknown TIER: $(TIER))
+  endif
+
   ifeq ($(MODE),release)
-    OPT := -O3 -DNDEBUG $(NATIVE) -flto
+    OPT := -O3 -DNDEBUG $(ARCHFLAGS) $(LTO)
   else ifeq ($(MODE),debug)
     OPT := -O0 -g3 -DDEBUG
   else ifeq ($(MODE),profile-gen)
-    OPT := -O3 -DNDEBUG $(NATIVE) -fprofile-generate=$(BUILD_DIR)/pgodata
+    OPT := -O3 -DNDEBUG $(ARCHFLAGS) -fprofile-generate=$(BUILD_DIR)/pgodata
   else ifeq ($(MODE),profile-use)
-    OPT := -O3 -DNDEBUG $(NATIVE) -flto -fprofile-use=$(BUILD_DIR)/pgodata -fprofile-correction
+    OPT := -O3 -DNDEBUG $(ARCHFLAGS) -flto -fprofile-use=$(BUILD_DIR)/pgodata -fprofile-correction
   else
     $(error Unknown MODE: $(MODE))
   endif
