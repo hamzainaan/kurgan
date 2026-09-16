@@ -144,6 +144,25 @@ namespace
         return passed;
     }
 
+    Bitboard advanceOf(Color c, Square sq)
+    {
+        return 1ULL << static_cast<int>(sq + (c == WHITE ? 8 : -8));
+    }
+
+    Square promotionSquare(Color c, Square sq)
+    {
+        return static_cast<Square>((c == WHITE) ? ((sq & 7) | 56) : (sq & 7));
+    }
+
+    int squareDistance(Square a, Square b)
+    {
+        const int fileDiff = static_cast<int>(a & 7) - static_cast<int>(b & 7);
+        const int rankDiff = static_cast<int>(a >> 3) - static_cast<int>(b >> 3);
+        const int df = fileDiff < 0 ? -fileDiff : fileDiff;
+        const int dr = rankDiff < 0 ? -rankDiff : rankDiff;
+        return df > dr ? df : dr;
+    }
+
     // Piece-type order used by the per-square evaluation terms.
     constexpr PieceType mobilityTypes[4] = {KNIGHT, BISHOP, ROOK, QUEEN};
     constexpr PieceType outpostTypes[2] = {KNIGHT, BISHOP};
@@ -161,6 +180,15 @@ namespace
     constexpr int ROOK_BEHIND_ENEMY_PASSER = 5;
     constexpr int ROOK_CONNECTED = 6;
     constexpr int ROOK_TRAPPED = 7;
+    constexpr int PAWN_STRUCT_NB = 8;
+    constexpr int PAWN_BACKWARD = 0;
+    constexpr int PAWN_CONNECTED = 1;
+    constexpr int PAWN_PHALANX = 2;
+    constexpr int PAWN_ISLANDS = 3;
+    constexpr int PAWN_PROTECTED_PASSER = 4;
+    constexpr int PAWN_CANDIDATE_PASSER = 5;
+    constexpr int PAWN_BLOCKED_PASSER = 6;
+    constexpr int PAWN_KING_DISTANCE = 7;
 
     // Per-piece attack sets, plus the unions the king-safety term needs. Laser
     // iterates pieces (not piece types) so that two pieces of the same type both
@@ -254,13 +282,22 @@ namespace
         }
     }
 
-    void pawnStructureScore(const Position &pos, const Bitboard passed[COLOR_NB], Color c,
-                            int &mg, int &eg)
+    void pawnStructureScore(const Position &pos, const AttackInfo &ai, Bitboard occ,
+                            const Bitboard passed[COLOR_NB], Color c, int &mg, int &eg)
     {
+        const Color them = static_cast<Color>(c ^ 1);
         const Bitboard pawns = pos.byColor[c] & pos.byType[PAWN];
+        const Bitboard enemyPawns = pos.byColor[them] & pos.byType[PAWN];
+        const Bitboard theirPawnAttacks = ai.byType[them][PAWN];
+        const Square theirKing = pos.kingSquare(them);
 
         int isolated = 0;
         int doubled = 0;
+        int backward = 0;
+        int candidate = 0;
+        int blocked = 0;
+        int protectedPasser = 0;
+        int kingDistance = 0;
 
         Bitboard b = pawns;
         while (b)
@@ -268,16 +305,31 @@ namespace
             const Square sq = popLsb(b);
             const int file = sq & 7;
             const int rank = sq >> 3;
+            const int relRank = relativeRank(c, rank);
+            const Bitboard adjacent = fileMask(file - 1) | fileMask(file + 1);
+            const bool defended = (movegen::pawnAttacksFrom(them, sq) & pawns) != 0;
 
-            if (!(pawns & (fileMask(file - 1) | fileMask(file + 1))))
+            if (!(pawns & adjacent))
                 ++isolated;
 
             if (passed[c] & (1ULL << sq))
             {
-                const int bucket = (c == WHITE) ? rank : 7 - rank;
-                mg += tuned::MG_PASSED[bucket];
-                eg += tuned::EG_PASSED[bucket];
+                mg += tuned::MG_PASSED[relRank];
+                eg += tuned::EG_PASSED[relRank];
+                kingDistance += squareDistance(theirKing, promotionSquare(c, sq));
+                if (defended)
+                    ++protectedPasser;
+                if (occ & advanceOf(c, sq))
+                    ++blocked;
+                continue;
             }
+
+            if (relRank >= 4 && defended && !(enemyPawns & fileMask(file) & ranksAhead(c, rank)))
+                ++candidate;
+
+            if (!defended && (theirPawnAttacks & advanceOf(c, sq))
+                && !(pawns & adjacent & ~ranksAhead(c, rank)))
+                ++backward;
         }
 
         for (int f = 0; f < 8; ++f)
@@ -285,6 +337,23 @@ namespace
             const int count = popCount(pawns & fileMask(f));
             if (count > 1)
                 doubled += count - 1;
+        }
+
+        uint8_t files = 0;
+        for (int f = 0; f < 8; ++f)
+            if (pawns & fileMask(f))
+                files |= static_cast<uint8_t>(1u << f);
+        const int islands = popCount(static_cast<Bitboard>(files & ~(files << 1) & 0xFF));
+
+        const int connected = popCount(pawns & ai.byType[c][PAWN]);
+        const int phalanx = popCount(pawns & (pawns >> 1) & ~FILE_H_BB);
+
+        const int counts[PAWN_STRUCT_NB] = {backward, connected, phalanx, islands,
+                                            protectedPasser, candidate, blocked, kingDistance};
+        for (int i = 0; i < PAWN_STRUCT_NB; ++i)
+        {
+            mg += tuned::MG_PAWN_STRUCT[i] * counts[i];
+            eg += tuned::EG_PAWN_STRUCT[i] * counts[i];
         }
 
         mg -= tuned::MG_ISOLATED * isolated + tuned::MG_DOUBLED * doubled;
@@ -659,7 +728,7 @@ int evaluate::evaluate(const Position &pos)
         const Color color = static_cast<Color>(c);
         mobilityScore(pos, color, occ, mg[c], eg[c], ai);
         outpostScore(pos, color, mg[c], eg[c]);
-        pawnStructureScore(pos, passed, color, mg[c], eg[c]);
+        pawnStructureScore(pos, ai, occ, passed, color, mg[c], eg[c]);
         minorPieceScore(pos, counts, color, mg[c], eg[c]);
         rookScore(pos, passed, color, occ, mg[c], eg[c]);
         imbalanceScore(counts, color, mg[c], eg[c]);
