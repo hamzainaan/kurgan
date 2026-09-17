@@ -7,10 +7,17 @@ ENGINE   := kurgan
 CXX      ?= g++
 CXXFLAGS ?=
 
+# Evaluation back ends: NNUE=1 compiles the network support in, HCE=0 removes
+# the hand-crafted evaluation. Each combination gets its own object directory.
+NNUE ?= 1
+HCE  ?= 1
+FEATURE_DEFS := $(if $(filter 1,$(NNUE)),-DKURGAN_NNUE) $(if $(filter 0,$(HCE)),-DKURGAN_HCE_OFF)
+VARIANT  := nnue$(NNUE)-hce$(HCE)
+
 MODE      ?= release
 SRC_DIR   := src
 BUILD_DIR := build
-OBJ_DIR   := $(BUILD_DIR)/obj/$(MODE)
+OBJ_DIR   := $(BUILD_DIR)/obj/$(MODE)/$(VARIANT)
 
 SRCS := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRCS))
@@ -62,7 +69,7 @@ endif
 # ------------------------------------------------------------------
 ifeq ($(COMPILER),msvc)
   EXE      := $(ENGINE).exe
-  CPPFLAGS := /I$(SRC_DIR) /I$(BUILD_DIR) /nologo /EHsc
+  CPPFLAGS := /I$(SRC_DIR) /I$(BUILD_DIR) /nologo /EHsc $(FEATURE_DEFS)
   CXXSTD   := /std:c++latest
   WARNINGS := /W3
   MKDIR    := mkdir -p
@@ -92,7 +99,7 @@ else
     LDFLAGS += -pthread
   endif
 
-  CPPFLAGS := -I$(SRC_DIR) -I$(BUILD_DIR)
+  CPPFLAGS := -I$(SRC_DIR) -I$(BUILD_DIR) $(FEATURE_DEFS)
   CXXSTD   := -std=c++23
   WARNINGS := -Wall -Wextra -Wshadow -Wconversion
   LTO      ?= -flto

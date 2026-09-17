@@ -27,8 +27,9 @@ Maintained in the quiet hope that it stops losing to Stockfish. It will not.
 - Transposition table, killers, history, LMR, null move.
 - Assorted pruning: reverse futility, futility, SEE-based quiet pruning.
 - Lazy SMP, tapered evaluation.
+- Optional NNUE evaluation.
 - Perft and a deterministic benchmark.
-- FRC960 (Fischer Random)
+- FRC960 (Fischer Random).
 
 ## Build
 
