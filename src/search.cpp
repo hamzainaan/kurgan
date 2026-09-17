@@ -23,9 +23,13 @@ namespace
     constexpr int MATE_THRESHOLD = MATE - 128;
     constexpr int MAX_PLY = 128;
     constexpr int MAX_DEPTH = 64;
+    constexpr int LMP_MAX_DEPTH = 10;
 
-    // Futility / pruning thresholds live in tuned_params.h so a match-based
-    // tuner can override them at runtime through UCI options.
+    // Late-move-pruning thresholds indexed by [improving][depth].
+    constexpr int LMP_TABLE[2][LMP_MAX_DEPTH + 1] = {
+        {0, 2, 3, 5, 9, 13, 18, 25, 34, 45, 55},
+        {0, 5, 6, 9, 14, 21, 30, 41, 55, 69, 84},
+    };
 
     // Runtime-tunable pruning parameters, exposed as UCI spin options.
     struct TuningParam
@@ -49,6 +53,12 @@ namespace
         {"NMP Depth Div", &tuned::NMP_DEPTH_DIV, 1, 16},
         {"NMP Eval Div", &tuned::NMP_EVAL_DIV, 50, 1000},
         {"NMP Verify Depth", &tuned::NMP_VERIFY_DEPTH, 2, 32},
+        {"Razor Depth", &tuned::RAZOR_DEPTH, 0, 8},
+        {"Razor Margin", &tuned::RAZOR_MARGIN, 0, 600},
+        {"ProbCut Depth", &tuned::PROBCUT_DEPTH, 3, 12},
+        {"ProbCut Margin", &tuned::PROBCUT_MARGIN, 0, 300},
+        {"IID Depth", &tuned::IID_DEPTH, 2, 12},
+        {"LMP Depth", &tuned::LMP_DEPTH, 0, 10},
     };
 
     // Transposition table bounds.
@@ -113,6 +123,8 @@ namespace
     thread_local int captureHistory[PIECE_NB][SQUARE_NB][PIECE_TYPE_NB];
     thread_local Move counterMoves[COLOR_NB][SQUARE_NB][SQUARE_NB];
     thread_local Move moveStack[MAX_PLY + 2];
+    thread_local int staticEvalStack[MAX_PLY + 2];
+    thread_local bool inIID = false;
     thread_local Move pvTable[MAX_PLY][MAX_PLY];
     thread_local int pvLength[MAX_PLY];
     thread_local uint64_t ttFilledLocal = 0;
@@ -223,10 +235,7 @@ namespace
         e.bound = static_cast<int8_t>(bound);
     }
 
-    // Dynamic time management: the optimum (soft) deadline is the target for a
-    // stable search, while the maximum (hard) deadline is cut off
-    // unconditionally by checkTime(). Unstable searches spend up to the hard
-    // limit; stable ones stop at the soft limit.
+    // Dynamic time management
     void computeDeadline(const search::SearchLimits &limits, Color us)
     {
         searchStart = std::chrono::steady_clock::now();
@@ -600,9 +609,7 @@ namespace
         if (ply > seldepth)
             seldepth = ply;
 
-        // Mate distance pruning: a mate found this deep cannot be shorter than
-        // one from the current ply, so tighten the window accordingly.
-        // Returning alpha keeps the score inside the already-proven bracket.
+        // Mate distance pruning
         if (alpha < -MATE + ply)
             alpha = -MATE + ply;
         if (beta > MATE - ply - 1)
@@ -651,11 +658,24 @@ namespace
         const bool inCheck = ksq != SQ_NONE &&
                              movegen::squareAttacked(pos, ksq, static_cast<Color>(us ^ 1));
 
-        // Static evaluation drives the pruning decisions below (non-PV only).
-        int staticEval = 0;
+        // Static evaluation drives the pruning decisions below. It is resolved
+        // for every node (not only non-PV ones) because `improving` compares it
+        // against the value two plies up the current line.
+        const int staticEval = inCheck ? -MATE + ply : evaluate::evaluate(pos);
+        staticEvalStack[ply] = staticEval;
+        const bool improving = !inCheck && ply >= 2 && staticEval >= staticEvalStack[ply - 2];
+        const bool mateWindow = beta >= MATE_THRESHOLD;
+
         if (!pvNode)
         {
-            staticEval = evaluate::evaluate(pos);
+            // Razoring: the static eval is so far below beta that even a
+            // quiescence search cannot reach it, so its result is final.
+            if (!inCheck && depth <= tuned::RAZOR_DEPTH && staticEval + tuned::RAZOR_MARGIN < beta)
+            {
+                const int razorScore = quiescence(pos, alpha, beta, ply);
+                if (razorScore < beta)
+                    return razorScore;
+            }
 
             // Reverse Futility Pruning (parent-node futility): if the static
             // eval is so far above beta that a shallow search cannot drop
@@ -713,6 +733,59 @@ namespace
             }
         }
 
+        // Thanks to the Xiphos
+        // --- ProbCut ---
+        // A good capture that already beats a raised beta by a wide margin is
+        // assumed to fail high, so the full-width search is skipped.
+        if (!pvNode && !inCheck && !mateWindow && depth >= tuned::PROBCUT_DEPTH)
+        {
+            const int probcutBeta = beta + tuned::PROBCUT_MARGIN;
+
+            MoveList probcutList;
+            movegen::generate_pseudo_legal_moves(pos, probcutList);
+
+            for (int i = 0; i < probcutList.size; ++i)
+            {
+                const Move m = probcutList.moves[i];
+                const bool quiet = !m.isPromotion() && !m.isEnPassant() && !m.isCastling() &&
+                                   pos.board[m.to()] == NO_PIECE;
+                if (quiet || see::evaluate(pos, m) < probcutBeta - staticEval)
+                    continue;
+
+                if (!pos.do_move(m))
+                    continue;
+
+                moveStack[ply + 1] = m;
+                int score = -quiescence(pos, -probcutBeta, -probcutBeta + 1, ply + 1);
+                if (score >= probcutBeta)
+                    score = -alphaBeta(pos, depth - tuned::PROBCUT_DEPTH + 1, -probcutBeta,
+                                       -probcutBeta + 1, ply + 1, false);
+                pos.undo_move(m);
+
+                if (stopFlag.load(std::memory_order_relaxed))
+                    return 0;
+                if (score >= probcutBeta)
+                    return score;
+            }
+        }
+
+        // Thanks to the Xiphos
+        // --- Internal Iterative Deepening ---
+        // A PV node without a TT move gets a shallower search first, purely to
+        // obtain a move worth ordering first on the real pass.
+        if (pvNode && !inIID && !inCheck && !mateWindow && ttMove == Move() &&
+            depth >= tuned::IID_DEPTH)
+        {
+            inIID = true;
+            alphaBeta(pos, depth - 2, alpha, beta, ply, true);
+            inIID = false;
+
+            if (stopFlag.load(std::memory_order_relaxed))
+                return 0;
+            if (tte.key == key)
+                ttMove = tte.move;
+        }
+
         MoveList list;
         movegen::generate_pseudo_legal_moves(pos, list);
 
@@ -729,9 +802,18 @@ namespace
         Move searchedCaptures[MoveList::MAX_MOVES];
         int searchedCaptureCount = 0;
 
+        int moveCount = 0;
         for (Move m = picker.next(pos); m != Move(); m = picker.next(pos))
         {
             const bool quiet = !m.isPromotion() && !m.isEnPassant() && !m.isCastling() && pos.board[m.to()] == NO_PIECE;
+            ++moveCount;
+
+            // Late Move Pruning: at shallow depth the tail of the quiet move
+            // list is hopeless. `legalMoves >= 1` keeps one move searched, so a
+            // node is never mistaken for mate/stalemate.
+            if (!pvNode && !inCheck && quiet && legalMoves >= 1 && depth <= tuned::LMP_DEPTH &&
+                moveCount > LMP_TABLE[improving ? 1 : 0][std::min(depth, LMP_MAX_DEPTH)])
+                continue;
 
             // Move-Level Futility Pruning: skip quiet moves that cannot raise
             // alpha even with a generous positional gain.
@@ -740,8 +822,8 @@ namespace
                 continue;
 
             // SEE-Based Quiet Pruning: skip quiet moves that hang material.
-            if (!pvNode && !inCheck && quiet && depth <= tuned::SEE_QUIET_DEPTH &&
-                see::evaluate(pos, m) < 0)
+            if (!pvNode && !inCheck && quiet && legalMoves >= 1 &&
+                depth <= tuned::SEE_QUIET_DEPTH && see::evaluate(pos, m) < 0)
                 continue;
 
             if (ply == 0 && (!inSearchMoves(m) || isExcludedRootMove(m)))
@@ -992,8 +1074,7 @@ namespace
         const auto start = std::chrono::steady_clock::now();
         int previousScore = 0;
 
-        // Dynamic time management state: how many consecutive iterations the
-        // best move has been unchanged, and whether the score fell last depth.
+        // Dynamic time management state
         Move stableMove;
         int stableIterations = 0;
         int scoreDrop = 0;
@@ -1023,8 +1104,7 @@ namespace
                     previousScore = score;
                 }
 
-                // Only the main thread reports: helper threads search silently
-                // and contribute through the shared transposition table.
+                // Only the main thread reports.
                 if (isMain)
                 {
                     const long long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1059,11 +1139,6 @@ namespace
             if (stopFlag.load(std::memory_order_relaxed))
                 break;
 
-            // Dynamic time management: once the optimum time has elapsed, stop
-            // early if the best move has been stable for several iterations and
-            // the score did not fall. Otherwise keep searching up to the hard
-            // limit (enforced by checkTime) in case the position is harder than
-            // the clock suggested. Suppressed while pondering pre-hit.
             if (isMain && depth >= 4 &&
                 !(ponderFlag.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed)))
             {
@@ -1119,7 +1194,7 @@ void search::go(const Position &root, const SearchLimits &limits)
     activeUs = root.sideToMove;
     nodesLimit = limits.nodes;
     mateGoal = limits.mate;
-    // Honor the Ponder option: never ponder unless it has been enabled.
+    // Never ponder unless it has been enabled.
     ponderFlag.store(limits.ponder && ponderSetting, std::memory_order_relaxed);
     ponderHitFlag.store(false, std::memory_order_relaxed);
     bestmoveEmitted.store(false, std::memory_order_relaxed);

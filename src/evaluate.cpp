@@ -16,6 +16,8 @@ namespace
     // --- Bit utilities and geometry ---
     constexpr Bitboard FILE_A_BB = 0x0101010101010101ULL;
     constexpr Bitboard RANK_1_BB = 0x00000000000000FFULL;
+    constexpr Bitboard RANK_4_BB = RANK_1_BB << 24;
+    constexpr Bitboard RANK_5_BB = RANK_1_BB << 32;
     constexpr Bitboard RANK_8_BB = RANK_1_BB << 56;
     constexpr Bitboard FILE_B_BB = FILE_A_BB << 1;
     constexpr Bitboard FILE_C_BB = FILE_A_BB << 2;
@@ -189,6 +191,17 @@ namespace
     constexpr int PAWN_CANDIDATE_PASSER = 5;
     constexpr int PAWN_BLOCKED_PASSER = 6;
     constexpr int PAWN_KING_DISTANCE = 7;
+    constexpr int THREATS_NB = 22;
+    constexpr int THREAT_KNIGHT_PAWN = 0;
+    constexpr int THREAT_BISHOP_PAWN = 5;
+    constexpr int THREAT_ROOK_PAWN = 10;
+    constexpr int THREAT_KING = 15;
+    constexpr int THREAT_PROTECTED_PAWN = 16;
+    constexpr int THREAT_PROTECTED_PAWN_PUSH = 17;
+    constexpr int THREAT_PAWN_MOBILITY = 18;
+    constexpr int THREAT_ON_QUEEN_KNIGHT = 19;
+    constexpr int THREAT_ON_QUEEN_BISHOP = 20;
+    constexpr int THREAT_ON_QUEEN_ROOK = 21;
 
     // Per-piece attack sets, plus the unions the king-safety term needs. Laser
     // iterates pieces (not piece types) so that two pieces of the same type both
@@ -468,6 +481,62 @@ namespace
         }
     }
 
+    void threatScore(const Position &pos, const AttackInfo &ai, Bitboard occ, Color c, int &mg, int &eg)
+    {
+        const Color them = static_cast<Color>(c ^ 1);
+        const Bitboard ourPawns = pos.byColor[c] & pos.byType[PAWN];
+        const Bitboard theirPieces = pos.byColor[them];
+        const Bitboard theirNonPawn = theirPieces & ~pos.byType[PAWN];
+
+        int counts[THREATS_NB] = {};
+
+        const int base[3] = {THREAT_KNIGHT_PAWN, THREAT_BISHOP_PAWN, THREAT_ROOK_PAWN};
+        for (int k = 0; k < ai.count[c]; ++k)
+        {
+            const AttackInfo::Entry &entry = ai.pieces[c][k];
+            const int pt = static_cast<int>(entry.type);
+            if (pt < KNIGHT || pt > ROOK)
+                continue;
+
+            const Bitboard victims = entry.attacks & theirPieces;
+            for (int vt = PAWN; vt <= QUEEN; ++vt)
+                counts[base[pt - KNIGHT] + vt] += popCount(victims & pos.byType[vt]);
+        }
+
+        if (movegen::attacks(KING, pos.kingSquare(c), occ) & theirPieces & ~ai.byType[them][PAWN])
+            counts[THREAT_KING] = 1;
+
+        const Bitboard theirAttacks = ai.full[them] | ai.byType[them][PAWN] | ai.byType[them][KING];
+        const Bitboard ourAttacks = ai.full[c] | ai.byType[c][PAWN] | ai.byType[c][KING];
+        const Bitboard safeArea = ourAttacks | ~theirAttacks;
+
+        const Bitboard empty = ~occ;
+        const Bitboard single = (c == WHITE) ? ((ourPawns << 8) & empty) : ((ourPawns >> 8) & empty);
+        const Bitboard pushes = single
+            | ((c == WHITE) ? ((single << 8) & empty & RANK_4_BB)
+                            : ((single >> 8) & empty & RANK_5_BB));
+        counts[THREAT_PAWN_MOBILITY] = popCount(pushes & safeArea);
+
+        const Bitboard safePawns = ourPawns & safeArea;
+        const Bitboard safePushes = pushes & safeArea;
+        counts[THREAT_PROTECTED_PAWN] = popCount(pawnAttackMap(c, safePawns) & theirNonPawn);
+        counts[THREAT_PROTECTED_PAWN_PUSH] = popCount(pawnAttackMap(c, safePushes) & theirNonPawn);
+
+        const Bitboard theirQueen = pos.byColor[them] & pos.byType[QUEEN];
+        if (theirQueen)
+        {
+            counts[THREAT_ON_QUEEN_KNIGHT] = (ai.byType[c][KNIGHT] & theirQueen) ? 1 : 0;
+            counts[THREAT_ON_QUEEN_BISHOP] = (ai.byType[c][BISHOP] & theirQueen) ? 1 : 0;
+            counts[THREAT_ON_QUEEN_ROOK] = (ai.byType[c][ROOK] & theirQueen) ? 1 : 0;
+        }
+
+        for (int i = 0; i < THREATS_NB; ++i)
+        {
+            mg += tuned::MG_THREATS[i] * counts[i];
+            eg += tuned::EG_THREATS[i] * counts[i];
+        }
+    }
+
     void imbalanceScore(const int counts[COLOR_NB][PIECE_TYPE_NB], Color us, int &mg, int &eg)
     {
         const Color them = static_cast<Color>(us ^ 1);
@@ -717,7 +786,11 @@ int evaluate::evaluate(const Position &pos)
 
     AttackInfo ai;
     for (int c = WHITE; c <= BLACK; ++c)
-        ai.byType[c][PAWN] = pawnAttackMap(static_cast<Color>(c), pos.byColor[c] & pos.byType[PAWN]);
+    {
+        const Color color = static_cast<Color>(c);
+        ai.byType[c][PAWN] = pawnAttackMap(color, pos.byColor[c] & pos.byType[PAWN]);
+        ai.byType[c][KING] = movegen::attacks(KING, pos.kingSquare(color), occ) & ~pos.byColor[c];
+    }
 
     Bitboard passed[COLOR_NB];
     for (int c = WHITE; c <= BLACK; ++c)
@@ -733,6 +806,9 @@ int evaluate::evaluate(const Position &pos)
         rookScore(pos, passed, color, occ, mg[c], eg[c]);
         imbalanceScore(counts, color, mg[c], eg[c]);
     }
+
+    for (int c = WHITE; c <= BLACK; ++c)
+        threatScore(pos, ai, occ, static_cast<Color>(c), mg[c], eg[c]);
 
     for (int c = WHITE; c <= BLACK; ++c)
     {
