@@ -9,6 +9,7 @@
 #include <cstring>
 #include <iostream>
 #include <mutex>
+#include <new>
 #include <thread>
 #include <vector>
 
@@ -97,7 +98,7 @@ namespace
     std::chrono::steady_clock::time_point searchStart;
     int maxDepth = MAX_DEPTH;
     int hashSizeMb = 16;
-    int threadCountSetting = 0; // 0 = auto
+    int threadCountSetting = 1;
     int multiPVSetting = 1;
     bool ponderSetting = false;
     int64_t nodesLimit = 0;
@@ -174,6 +175,13 @@ namespace
     {
         const Bitboard k = pos.byColor[c] & pos.byType[KING];
         return k ? lsb(k) : SQ_NONE;
+    }
+
+    // Hardware concurrency of the machine the engine is running on.
+    int hardwareThreads()
+    {
+        const unsigned n = std::thread::hardware_concurrency();
+        return n < 1 ? 1 : static_cast<int>(n);
     }
 
     // True when neither side has mating material.
@@ -1232,6 +1240,18 @@ namespace
     }
 }
 
+int search::clampOption(const char *name, int value, int minValue, int maxValue)
+{
+    const int clamped = std::clamp(value, minValue, maxValue);
+    if (clamped != value)
+    {
+        std::lock_guard<std::mutex> lock(outputMutex);
+        std::cout << "info string " << name << " value " << value << " is out of range ["
+                  << minValue << ", " << maxValue << "], set to " << clamped << std::endl;
+    }
+    return clamped;
+}
+
 void search::init()
 {
     movegen::init();
@@ -1336,25 +1356,34 @@ uint64_t search::totalNodes()
 
 void search::setHashSize(int megabytes)
 {
-    if (megabytes < 1)
-        megabytes = 1;
-    if (megabytes > 65536)
-        megabytes = 65536;
-    if (megabytes != hashSizeMb)
+    megabytes = clampOption("Hash", megabytes, HASH_MIN, HASH_MAX);
+    if (megabytes == hashSizeMb)
+        return;
+
+    // The table is allocated lazily; only a live table can fail to grow.
+    if (tt.empty())
     {
         hashSizeMb = megabytes;
-        if (!tt.empty())
-            ttResize(static_cast<size_t>(hashSizeMb));
+        return;
     }
+
+    try
+    {
+        ttResize(static_cast<size_t>(megabytes));
+    }
+    catch (const std::bad_alloc &)
+    {
+        std::lock_guard<std::mutex> lock(outputMutex);
+        std::cout << "info string Hash " << megabytes << " MB could not be allocated, keeping "
+                  << hashSizeMb << " MB" << std::endl;
+        return;
+    }
+    hashSizeMb = megabytes;
 }
 
 void search::setThreads(int count)
 {
-    if (count < 0)
-        count = 0;
-    if (count > 256)
-        count = 256;
-    threadCountSetting = count;
+    threadCountSetting = clampOption("Threads", count, THREADS_MIN, maxThreadCount());
 }
 
 int search::threadSetting()
@@ -1374,24 +1403,17 @@ int search::hashSize()
 
 int search::threadCount()
 {
-    if (threadCountSetting > 0)
-        return threadCountSetting;
+    return threadCountSetting;
+}
 
-    unsigned n = std::thread::hardware_concurrency();
-    if (n < 1)
-        n = 1;
-    if (n > 32)
-        n = 32;
-    return static_cast<int>(n);
+int search::maxThreadCount()
+{
+    return hardwareThreads();
 }
 
 void search::setMultiPV(int value)
 {
-    if (value < 1)
-        value = 1;
-    if (value > 64)
-        value = 64;
-    multiPVSetting = value;
+    multiPVSetting = clampOption("MultiPV", value, MULTIPV_MIN, MULTIPV_MAX);
 }
 
 void search::setPonder(bool enabled)
@@ -1442,7 +1464,7 @@ bool search::setTuningOption(const std::string &name, int value)
     {
         if (name == p.name)
         {
-            *p.value = std::clamp(value, p.minValue, p.maxValue);
+            *p.value = clampOption(p.name, value, p.minValue, p.maxValue);
             return true;
         }
     }

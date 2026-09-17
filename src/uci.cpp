@@ -11,6 +11,7 @@
 #include <chrono>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -199,11 +200,14 @@ void uci::loop()
         {
             std::cout << "id name Kurgan " << KURGAN_VERSION << std::endl;
             std::cout << "id author Hamza Inan" << std::endl;
-            std::cout << "option name Hash type spin default 16 min 1 max 65536" << std::endl;
-            std::cout << "option name Threads type spin default 1 min 1 max 256" << std::endl;
+            std::cout << "option name Hash type spin default 16 min " << search::HASH_MIN
+                      << " max " << search::HASH_MAX << std::endl;
+            std::cout << "option name Threads type spin default 1 min " << search::THREADS_MIN
+                      << " max " << search::maxThreadCount() << std::endl;
             std::cout << "option name Ponder type check default false" << std::endl;
             std::cout << "option name UCI_Chess960 type check default false" << std::endl;
-            std::cout << "option name MultiPV type spin default 1 min 1 max 64" << std::endl;
+            std::cout << "option name MultiPV type spin default 1 min " << search::MULTIPV_MIN
+                      << " max " << search::MULTIPV_MAX << std::endl;
             std::cout << "option name Clear Hash type button" << std::endl;
             std::cout << search::tuningOptionsUci();
             std::cout << "uciok" << std::endl;
@@ -266,12 +270,12 @@ void uci::loop()
                     search::setMultiPV(std::stoi(value));
                 else if (name == "Clear Hash")
                     search::clear();
-                else
-                    search::setTuningOption(name, std::stoi(value));
+                else if (!search::setTuningOption(name, std::stoi(value)))
+                    std::cout << "info string unknown option " << name << std::endl;
             }
-            catch (...)
+            catch (const std::exception &)
             {
-                // Ignore malformed option values.
+                std::cout << "info string invalid value '" << value << "' for option " << name << std::endl;
             }
         }
         else if (cmd == "position")
