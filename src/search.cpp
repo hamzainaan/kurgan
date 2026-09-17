@@ -639,14 +639,26 @@ namespace
         if (tte.key == key)
         {
             ttMove = tte.move;
-            if (!pvNode && tte.depth >= depth)
+            const int s = scoreFromTT(tte.score, ply);
+
+            if (tte.bound == BOUND_EXACT
+                && (s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD))
             {
-                const int s = scoreFromTT(tte.score, ply);
-                if (tte.bound == BOUND_EXACT)
-                    return s;
-                if (tte.bound == BOUND_LOWER && s >= beta)
-                    return s;
-                if (tte.bound == BOUND_UPPER && s <= alpha)
+                // The root still has to name a move. The extra MultiPV lines
+                // must walk their own moves, so leave them alone.
+                if (ply == 0 && ttMove != Move() && excludedRootMoves.empty())
+                {
+                    pvTable[0][0] = ttMove;
+                    pvLength[0] = 1;
+                }
+                return s;
+            }
+
+            if (tte.depth >= depth && !pvNode)
+            {
+                if (tte.bound == BOUND_EXACT
+                    || (tte.bound == BOUND_LOWER && s >= beta)
+                    || (tte.bound == BOUND_UPPER && s <= alpha))
                     return s;
             }
         }
@@ -1040,12 +1052,11 @@ namespace
                     return score;
                 // Fail-low: lower alpha and tighten beta toward the true value.
                 beta = (alpha + beta) / 2;
-                alpha = std::max(-INF, score - delta);
+                alpha = (score <= -MATE_THRESHOLD) ? -INF : std::max(-INF, score - delta);
             }
             else if (score >= beta)
             {
-                // Fail-high: raise beta.
-                beta = std::min(INF, score + delta);
+                beta = (score >= MATE_THRESHOLD) ? INF : std::min(INF, score + delta);
             }
             else
             {
@@ -1054,6 +1065,56 @@ namespace
 
             delta += delta / 2;
         }
+    }
+
+    int extendPVFromTT(Position &pos, Move *pv, int length)
+    {
+        uint64_t seen[MAX_PLY + 1];
+        int seenCount = 0;
+        int played = 0;
+        bool complete = true;
+
+        seen[seenCount++] = pos.zobristKey;
+
+        for (int i = 0; i < length && played < MAX_PLY - 1; ++i)
+        {
+            if (!pos.do_move(pv[i]))
+            {
+                complete = false;
+                break;
+            }
+            seen[seenCount++] = pos.zobristKey;
+            ++played;
+        }
+
+        while (complete && played < MAX_PLY - 1)
+        {
+            const TTEntry &e = ttEntry(pos.zobristKey);
+            if (e.key != pos.zobristKey || e.move == Move())
+                break;
+
+            const Move m = e.move;
+            if (!pos.do_move(m))
+                break;
+
+            bool repeated = false;
+            for (int i = 0; i < seenCount; ++i)
+                if (seen[i] == pos.zobristKey)
+                    repeated = true;
+            if (repeated)
+            {
+                pos.undo_move(m);
+                break;
+            }
+
+            seen[seenCount++] = pos.zobristKey;
+            pv[played++] = m;
+        }
+
+        for (int i = played - 1; i >= 0; --i)
+            pos.undo_move(pv[i]);
+
+        return played;
     }
 
     void iterativeDeepening(Position &pos)
@@ -1113,7 +1174,8 @@ namespace
                     // Report aggregate nodes across all threads so nps scales
                     // with the thread count instead of reflecting one worker's
                     // share of the work.
-                    printInfo(depth, score, searchedNodes.load(std::memory_order_relaxed), elapsed, pvTable[0], pvLength[0], mpv);
+                    const int pvLen = extendPVFromTT(pos, pvTable[0], pvLength[0]);
+                    printInfo(depth, score, searchedNodes.load(std::memory_order_relaxed), elapsed, pvTable[0], pvLen, mpv);
 
                     if (mpv == 1)
                     {
