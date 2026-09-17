@@ -15,6 +15,20 @@ OBJ_DIR   := $(BUILD_DIR)/obj/$(MODE)
 SRCS := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRCS))
 
+VERSION  ?= -dev
+BUILD_AT ?= $(shell date -u '+%Y-%m-%d %H:%M UTC' 2>/dev/null || date '+%Y-%m-%d %H:%M' 2>/dev/null)
+BUILD_AT := $(if $(strip $(BUILD_AT)),$(BUILD_AT),unknown)
+
+VERSION_H     := $(BUILD_DIR)/version.h
+VERSION_STAMP := $(BUILD_DIR)/.version-stamp
+STAMP_TEXT    := $(VERSION) | $(BUILD_AT)
+
+ifneq ($(STAMP_TEXT),$(shell cat $(VERSION_STAMP) 2>/dev/null))
+  $(shell mkdir -p $(BUILD_DIR))
+  $(shell printf '#pragma once\n\n#define KURGAN_VERSION "%s"\n#define KURGAN_BUILD "%s"\n' '$(VERSION)' '$(BUILD_AT)' > $(VERSION_H))
+  $(shell printf '%s' '$(STAMP_TEXT)' > $(VERSION_STAMP))
+endif
+
 # ------------------------------------------------------------------
 # Platform detection (Unix, macOS, Windows)
 # ------------------------------------------------------------------
@@ -48,7 +62,7 @@ endif
 # ------------------------------------------------------------------
 ifeq ($(COMPILER),msvc)
   EXE      := $(ENGINE).exe
-  CPPFLAGS := /I$(SRC_DIR) /nologo /EHsc
+  CPPFLAGS := /I$(SRC_DIR) /I$(BUILD_DIR) /nologo /EHsc
   CXXSTD   := /std:c++latest
   WARNINGS := /W3
   MKDIR    := mkdir -p
@@ -78,7 +92,7 @@ else
     LDFLAGS += -pthread
   endif
 
-  CPPFLAGS := -I$(SRC_DIR)
+  CPPFLAGS := -I$(SRC_DIR) -I$(BUILD_DIR)
   CXXSTD   := -std=c++23
   WARNINGS := -Wall -Wextra -Wshadow -Wconversion
   LTO      ?= -flto

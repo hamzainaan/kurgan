@@ -6,6 +6,7 @@
 #include "perft.h"
 #include "position.h"
 #include "search.h"
+#include "version.h"
 
 #include <chrono>
 #include <iostream>
@@ -196,7 +197,7 @@ void uci::loop()
 
         if (cmd == "uci")
         {
-            std::cout << "id name Kurgan" << std::endl;
+            std::cout << "id name Kurgan " << KURGAN_VERSION << std::endl;
             std::cout << "id author Hamza Inan" << std::endl;
             std::cout << "option name Hash type spin default 16 min 1 max 65536" << std::endl;
             std::cout << "option name Threads type spin default 1 min 1 max 256" << std::endl;
