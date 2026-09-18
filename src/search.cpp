@@ -859,6 +859,11 @@ namespace
             else if (!m.isCastling())
                 searchedCaptures[searchedCaptureCount++] = m;
 
+            const Square checkSq = kingSquare(pos, pos.sideToMove);
+            const bool givesCheck = checkSq != SQ_NONE &&
+                                    movegen::squareAttacked(pos, checkSq,
+                                                            static_cast<Color>(pos.sideToMove ^ 1));
+
             int score;
             if (legalMoves == 1)
             {
@@ -869,7 +874,7 @@ namespace
             {
                 // Late Move Reduction: reduce late, quiet moves.
                 int r = 0;
-                if (quiet)
+                if (quiet && !givesCheck)
                     r = lmrReduction(pvNode, depth, legalMoves, history[us][m.from()][moveTarget(m)]);
 
                 const int newDepth = std::max(0, depth - 1 - r);
