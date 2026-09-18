@@ -483,8 +483,14 @@ bool Position::set_fen(const std::string &fen)
 {
     std::istringstream ss(fen);
     std::string boardStr, sideStr, castlingStr, epStr, halfmoveStr, fullmoveStr;
-    if (!(ss >> boardStr >> sideStr >> castlingStr >> epStr >> halfmoveStr >> fullmoveStr))
+    if (!(ss >> boardStr >> sideStr >> castlingStr >> epStr))
         return false;
+
+    // The halfmove clock and the fullmove number are optional in UCI.
+    if (!(ss >> halfmoveStr))
+        halfmoveStr = "0";
+    if (!(ss >> fullmoveStr))
+        fullmoveStr = "1";
 
     initZobrist();
     clear();

@@ -101,16 +101,34 @@ namespace
         else if (token == "fen")
         {
             std::string fen;
-            for (int i = 0; i < 6; ++i)
+            for (int i = 0; i < 4; ++i)
             {
                 std::string part;
                 if (!(ss >> part))
-                    break;
+                {
+                    std::cout << "info string invalid fen '" << fen << '\'' << std::endl;
+                    return;
+                }
                 if (i > 0)
                     fen += ' ';
                 fen += part;
             }
-            pos.set_fen(fen);
+
+            for (int i = 0; i < 2; ++i)
+            {
+                ss >> std::ws;
+                const int next = ss.peek();
+                if (next == EOF || next < '0' || next > '9')
+                    break;
+                std::string part;
+                ss >> part;
+                fen += ' ';
+                fen += part;
+            }
+
+            // A rejected FEN used to leave the previous position.
+            if (!pos.set_fen(fen))
+                std::cout << "info string invalid fen '" << fen << '\'' << std::endl;
         }
         else
         {
