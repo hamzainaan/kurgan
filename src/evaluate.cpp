@@ -816,7 +816,8 @@ int evaluate::evaluate(const Position &pos)
         const uint8_t rights = static_cast<uint8_t>(color == WHITE ? (WHITE_OO | WHITE_OOO) : (BLACK_OO | BLACK_OOO));
         int ks = 0;
         kingPawnScore(pos, color, ks);
-        ks -= kingAttackScore(pos, ai, occ, counts, static_cast<Color>(c ^ 1), ks);
+        ks -= kingAttackScore(pos, ai, occ, counts, static_cast<Color>(c ^ 1), ks)
+            * tuned::KS_ATTACK_SCALE / 100;
         ks += tuned::CASTLING_RIGHTS_VALUE[popCount(static_cast<Bitboard>(pos.castlingRights & rights))];
         ks = ks * tuned::KS_SCALE / 100;
         mg[c] += ks;

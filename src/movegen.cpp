@@ -381,7 +381,7 @@ namespace
         pos.sideToMove = them;
     }
 
-    void generatePawnMoves(const Position &pos, Bitboard empty, MoveList &list)
+    void generatePawnMoves(const Position &pos, Bitboard empty, MoveList &list, bool tacticalOnly = false)
     {
         const Color us = pos.sideToMove;
         const Color them = static_cast<Color>(us ^ 1);
@@ -403,14 +403,14 @@ namespace
         }
 
         b = single & ~promoRank;
-        while (b)
+        while (!tacticalOnly && b)
         {
             const Square to = popLsb(b);
             list.add(Move(static_cast<Square>(to - up), to));
         }
 
         b = (us == WHITE ? ((pawns & RANK_2_BB) << 16) : ((pawns & RANK_7_BB) >> 16)) & empty & (us == WHITE ? empty << 8 : empty >> 8);
-        while (b)
+        while (!tacticalOnly && b)
         {
             const Square to = popLsb(b);
             list.add(Move(static_cast<Square>(to - 2 * up), to));
@@ -441,7 +441,7 @@ namespace
         }
     }
 
-    void generatePieceMoves(const Position &pos, PieceType pt, MoveList &list)
+    void generatePieceMoves(const Position &pos, PieceType pt, MoveList &list, bool tacticalOnly = false)
     {
         const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
         const Bitboard notOurs = ~pos.byColor[pos.sideToMove];
@@ -451,18 +451,22 @@ namespace
         {
             const Square from = popLsb(pieces);
             Bitboard targets = pieceAttacks(pt, from, occ) & notOurs;
+            if (tacticalOnly)
+                targets &= occ;
             while (targets)
                 list.add(Move(from, popLsb(targets)));
         }
     }
 
-    void generateKingMoves(const Position &pos, MoveList &list)
+    void generateKingMoves(const Position &pos, MoveList &list, bool tacticalOnly = false)
     {
         const Bitboard k = pos.byColor[pos.sideToMove] & pos.byType[KING];
         if (!k)
             return;
         const Square ksq = lsb(k);
         Bitboard targets = kingAttacks[ksq] & ~pos.byColor[pos.sideToMove];
+        if (tacticalOnly)
+            targets &= pos.byColor[WHITE] | pos.byColor[BLACK];
         while (targets)
             list.add(Move(ksq, popLsb(targets)));
     }
@@ -570,6 +574,21 @@ void movegen::generate_pseudo_legal_moves(const Position &pos, MoveList &list)
     generatePieceMoves(pos, QUEEN, list);
     generateKingMoves(pos, list);
     generateCastling(pos, list);
+}
+
+void movegen::generate_tactical_moves(const Position &pos, MoveList &list)
+{
+    list.clear();
+
+    const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
+    const Bitboard empty = ~occ;
+
+    generatePawnMoves(pos, empty, list, true);
+    generatePieceMoves(pos, KNIGHT, list, true);
+    generatePieceMoves(pos, BISHOP, list, true);
+    generatePieceMoves(pos, ROOK, list, true);
+    generatePieceMoves(pos, QUEEN, list, true);
+    generateKingMoves(pos, list, true);
 }
 
 bool movegen::is_legal(const Position &pos, Move move)

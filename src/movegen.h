@@ -111,6 +111,10 @@ namespace movegen
     // Generate all pseudo-legal moves for the side to move.
     void generate_pseudo_legal_moves(const Position &pos, MoveList &list);
 
+    // Same moves as above in the same relative order, but only captures,
+    // promotions and en passant.
+    void generate_tactical_moves(const Position &pos, MoveList &list);
+
     // True if the pseudo-legal move leaves the mover's king out of check.
     bool is_legal(const Position &pos, Move move);
 }

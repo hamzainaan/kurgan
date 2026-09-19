@@ -998,7 +998,10 @@ namespace
         }
 
         MoveList list;
-        movegen::generate_pseudo_legal_moves(pos, list);
+        if (inCheck)
+            movegen::generate_pseudo_legal_moves(pos, list);
+        else
+            movegen::generate_tactical_moves(pos, list);
 
         MovePicker picker;
         picker.init(pos, list, Move(), counter, ply, !inCheck);
