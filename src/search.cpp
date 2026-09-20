@@ -228,6 +228,14 @@ namespace
     void ttStore(uint64_t key, Move move, int score, int depth, int bound, int ply)
     {
         TTEntry &e = tt[key & ttMask];
+
+        if (e.key != 0 && e.bound == BOUND_EXACT)
+        {
+            const int stored = scoreFromTT(e.score, ply);
+            const bool storedMate = stored >= MATE_THRESHOLD || stored <= -MATE_THRESHOLD;
+            if (storedMate && (e.key != key || bound != BOUND_EXACT))
+                return;
+        }
         if (e.key == 0)
         {
             // Count newly filled entries locally and flush to the shared
@@ -591,6 +599,8 @@ namespace
         if (need <= 0 || need > MAX_PLY - 1 - ply)
             return false;
 
+        const Color us = pos.sideToMove;
+        const Color mated = score > 0 ? static_cast<Color>(us ^ 1) : us;
         int n = 0;
         while (n < need)
         {
@@ -602,7 +612,30 @@ namespace
             ++n;
         }
 
-        const bool mate = n == need && isCheckmated(pos);
+
+        if (n == need - 1)
+        {
+            MoveList list;
+            movegen::generate_pseudo_legal_moves(pos, list);
+            for (int i = 0; i < list.count(); ++i)
+            {
+                const Move m = list[i];
+                if (!movegen::is_legal(pos, m) || !pos.do_move(m))
+                    continue;
+
+                if (pos.sideToMove == mated && isCheckmated(pos))
+                {
+                    // Leave the move applied: the undo loop below pops it.
+                    pvTable[ply][ply + n] = m;
+                    ++n;
+                    break;
+                }
+
+                pos.undo_move(m);
+            }
+        }
+
+        const bool mate = n == need && pos.sideToMove == mated && isCheckmated(pos);
         while (n > 0)
             pos.undo_move(pvTable[ply][ply + --n]);
 
@@ -693,8 +726,9 @@ namespace
             ttMove = tte.move;
             const int s = scoreFromTT(tte.score, ply);
 
-            if (tte.bound == BOUND_EXACT && ply > 0
-                && (s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD)
+
+            const bool mate = s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD;
+            if (tte.bound == BOUND_EXACT && ply > 0 && mate
                 && (!pvNode || hasMateProof(pos, ply, s)))
                 return s;
 
@@ -1215,6 +1249,26 @@ namespace
         }
 
         const bool isMain = (workerId == 0);
+
+        if (isMain && rootHasLegalMove)
+        {
+            const TTEntry &e = ttEntry(pos.zobristKey);
+            if (e.key == pos.zobristKey && e.move != Move())
+            {
+                const int s = scoreFromTT(e.score, 0);
+                if ((s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD) && hasMateProof(pos, 0, s))
+                {
+                    seldepth = pvLength[0];
+                    printInfo(1, s, searchedNodes.load(std::memory_order_relaxed), 0, pvTable[0], pvLength[0]);
+                    std::lock_guard<std::mutex> lock(bestMutex);
+                    if (1 > completedDepth)
+                    {
+                        completedDepth = 1;
+                        finalBestMove = pvTable[0][0];
+                    }
+                }
+            }
+        }
 
         const auto start = std::chrono::steady_clock::now();
         int previousScore = 0;
