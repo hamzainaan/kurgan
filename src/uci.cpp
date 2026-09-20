@@ -66,6 +66,9 @@ namespace
             if (m.from() != from)
                 continue;
 
+            if (!movegen::is_legal(pos, m))
+                continue;
+
             if (m.isCastling())
             {
                 if (movegen::chess960() ? m.to() == to
@@ -142,8 +145,17 @@ namespace
             while (ss >> moveStr)
             {
                 const Move m = parseMove(pos, moveStr);
-                if (m.from() == m.to() || !pos.do_move(m))
+                if (m.from() == m.to())
+                {
+                    // Never stop silently
+                    std::cout << "info string invalid move '" << moveStr << '\'' << std::endl;
                     break;
+                }
+                if (!pos.do_move(m))
+                {
+                    std::cout << "info string illegal move '" << moveStr << '\'' << std::endl;
+                    break;
+                }
             }
         }
     }
@@ -175,12 +187,19 @@ namespace
             else if (token == "searchmoves")
             {
                 std::string moveStr;
+                int requested = 0;
                 while (ss >> moveStr)
                 {
+                    ++requested;
                     const Move m = parseMove(pos, moveStr);
-                    if (m.from() != m.to())
+                    if (m.from() == m.to())
+                        std::cout << "info string invalid searchmoves '" << moveStr << '\'' << std::endl;
+                    else
                         limits.searchmoves.push_back(m);
                 }
+                // Say so out loud, because the caller asked for one.
+                if (requested > 0 && limits.searchmoves.empty())
+                    std::cout << "info string no legal searchmoves, searching all moves" << std::endl;
             }
             // "infinite" imposes no limit here.
         }

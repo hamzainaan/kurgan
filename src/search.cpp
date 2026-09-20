@@ -684,28 +684,32 @@ namespace
         const int staticEval = inCheck ? -MATE + ply : evaluate::evaluate(pos);
         staticEvalStack[ply] = staticEval;
         const bool improving = !inCheck && ply >= 2 && staticEval >= staticEvalStack[ply - 2];
-        const bool mateWindow = beta >= MATE_THRESHOLD;
+        const bool mateWindow = beta >= MATE_THRESHOLD || beta <= -MATE_THRESHOLD;
+
+        const Bitboard nonPawnPieces = pos.byType[KNIGHT] | pos.byType[BISHOP] |
+                                       pos.byType[ROOK] | pos.byType[QUEEN];
+        const bool hasNonPawn = (nonPawnPieces & pos.byColor[us]) != 0;
 
         if (!pvNode)
         {
             // Razoring: the static eval is so far below beta that even a
             // quiescence search cannot reach it, so its result is final.
-            if (!inCheck && depth <= tuned::RAZOR_DEPTH && staticEval + tuned::RAZOR_MARGIN < beta)
+            if (!inCheck && !mateWindow && depth <= tuned::RAZOR_DEPTH && staticEval + tuned::RAZOR_MARGIN < beta)
             {
                 const int razorScore = quiescence(pos, alpha, beta, ply);
                 if (razorScore < beta)
                     return razorScore;
             }
 
-            // Reverse Futility Pruning (parent-node futility): if the static
-            // eval is so far above beta that a shallow search cannot drop
-            // below it, return immediately.
-            if (!inCheck && depth <= tuned::RFP_DEPTH && staticEval - tuned::RFP_MARGIN * depth >= beta)
+            // Reverse Futility Pruning (parent-node futility): at pre-frontier nodes a quiet position whose eval is
+            // so far above beta that even a quiescence search cannot reach it returns immediately.
+            if (!inCheck && !mateWindow && hasNonPawn && depth <= tuned::RFP_DEPTH &&
+                staticEval - tuned::RFP_MARGIN * depth >= beta)
                 return staticEval;
 
             // Child-Node Futility Pruning: at pre-frontier nodes a quiet
             // position whose eval cannot reach alpha returns immediately.
-            if (!inCheck && depth <= tuned::FUTILITY_DEPTH && staticEval + tuned::FUTILITY_MARGIN * depth <= alpha)
+            if (!inCheck && !mateWindow && depth <= tuned::FUTILITY_DEPTH && staticEval + tuned::FUTILITY_MARGIN * depth <= alpha)
                 return staticEval;
         }
 
@@ -713,10 +717,7 @@ namespace
         // Skip in PV nodes, shallow nodes, pawn-only endings (zugzwang risk),
         // and when in check. Only try a null move when the static eval already
         // fails high; otherwise it rarely produces a cutoff.
-        const Bitboard nonPawn = pos.byType[KNIGHT] | pos.byType[BISHOP] |
-                                 pos.byType[ROOK] | pos.byType[QUEEN];
-
-        if (!pvNode && !inNullVerification && !inCheck && depth >= tuned::NMP_MIN_DEPTH && (nonPawn & pos.byColor[us]) && staticEval >= beta)
+        if (!pvNode && !inNullVerification && !inCheck && !mateWindow && depth >= tuned::NMP_MIN_DEPTH && hasNonPawn && staticEval >= beta)
         {
             // Dynamic null move reduction: deeper nodes and a larger eval
             // margin above beta allow a more aggressive reduction.
@@ -841,9 +842,9 @@ namespace
                 legalMoves >= 1 && staticEval + tuned::MOVE_FUTILITY_MARGIN * depth <= alpha)
                 continue;
 
-            // SEE-Based Quiet Pruning: skip quiet moves that hang material.
-            if (!pvNode && !inCheck && quiet && legalMoves >= 1 &&
-                depth <= tuned::SEE_QUIET_DEPTH && see::evaluate(pos, m) < 0)
+            // SEE-Based Quiet Pruning
+            if (!pvNode && !inCheck && quiet && legalMoves >= 1 && depth <= tuned::SEE_QUIET_DEPTH &&
+                see::evaluate(pos, m) < -15 * (depth - 1) * (depth - 1))
                 continue;
 
             if (ply == 0 && (!inSearchMoves(m) || isExcludedRootMove(m)))
@@ -1147,6 +1148,18 @@ namespace
         excludedRootMoves.clear();
         ttFilledLocal = 0;
 
+        // A root without a single legal move (checkmate/stalemate) has nothing to search.
+        bool rootHasLegalMove = false;
+        {
+            MoveList rootList;
+            movegen::generate_pseudo_legal_moves(pos, rootList);
+            for (int i = 0; i < rootList.size && !rootHasLegalMove; ++i)
+            {
+                Position probe = pos;
+                rootHasLegalMove = probe.do_move(rootList.moves[i]);
+            }
+        }
+
         const bool isMain = (workerId == 0);
         const auto start = std::chrono::steady_clock::now();
         int previousScore = 0;
@@ -1217,6 +1230,10 @@ namespace
             if (stopFlag.load(std::memory_order_relaxed))
                 break;
 
+            // Nothing was searched at this depth.
+            if (!rootHasLegalMove)
+                break;
+
             if (isMain && depth >= 4 &&
                 !(ponderFlag.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed)))
             {
@@ -1281,6 +1298,34 @@ void search::go(const Position &root, const SearchLimits &limits)
     }
 
     activeLimits = limits;
+
+    // A searchmoves list without a single legal root move would leave the root
+    // with nothing to search.
+    if (!activeLimits.searchmoves.empty())
+    {
+        std::vector<Move> usable;
+        for (Move requested : activeLimits.searchmoves)
+        {
+            Position probe = root;
+            if (probe.do_move(requested))
+                usable.push_back(requested);
+        }
+
+        if (usable.empty())
+        {
+            activeLimits.searchmoves.clear();
+            if (!silentOutput)
+            {
+                std::lock_guard<std::mutex> lock(outputMutex);
+                std::cout << "info string no legal searchmoves, searching all moves" << std::endl;
+            }
+        }
+        else
+        {
+            activeLimits.searchmoves = std::move(usable);
+        }
+    }
+
     activeUs = root.sideToMove;
     nodesLimit = limits.nodes;
     mateGoal = limits.mate;

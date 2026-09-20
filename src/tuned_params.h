@@ -154,11 +154,13 @@ constexpr std::array<int, 8> EG_PASSED = {
        0,  -37,  -33,   -1,   36,  112,  132,    0,
 };
 
-constexpr std::array<int, 8> MG_PAWN_STRUCT = {
-      -8,   20,   10,   -2,   20,   26,   -3,   -6,
+constexpr std::array<int, 16> MG_PAWN_STRUCT = {
+     -16,   28,   19,  -12,   31,   12,   -7,   -7,
+       4,   -2,   -4,   17,   -4,    0,   14,  -16,
 };
-constexpr std::array<int, 8> EG_PAWN_STRUCT = {
-      -2,    5,    1,   -2,    5,   24,  -30,   14,
+constexpr std::array<int, 16> EG_PAWN_STRUCT = {
+      -1,    5,   -8,    1,   13,   19,  -26,   15,
+     -12,    3,    3,    5,    4,   -6,  -41,   37,
 };
 
 constexpr std::array<int, 22> MG_THREATS = {
