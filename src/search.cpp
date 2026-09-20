@@ -568,6 +568,50 @@ namespace
         return r;
     }
 
+    // True when the side to move is checkmated.
+    bool isCheckmated(Position &pos)
+    {
+        const Color us = pos.sideToMove;
+        const Square ksq = kingSquare(pos, us);
+        if (ksq == SQ_NONE || !movegen::squareAttacked(pos, ksq, static_cast<Color>(us ^ 1)))
+            return false;
+
+        MoveList list;
+        movegen::generate_pseudo_legal_moves(pos, list);
+        for (int i = 0; i < list.count(); ++i)
+            if (movegen::is_legal(pos, list[i]))
+                return false;
+
+        return true;
+    }
+
+    bool hasMateProof(Position &pos, int ply, int score)
+    {
+        const int need = (score > 0 ? MATE - score : MATE + score) - ply;
+        if (need <= 0 || need > MAX_PLY - 1 - ply)
+            return false;
+
+        int n = 0;
+        while (n < need)
+        {
+            const TTEntry &e = ttEntry(pos.zobristKey);
+            if (e.key != pos.zobristKey || e.move == Move() || !pos.do_move(e.move))
+                break;
+
+            pvTable[ply][ply + n] = e.move;
+            ++n;
+        }
+
+        const bool mate = n == need && isCheckmated(pos);
+        while (n > 0)
+            pos.undo_move(pvTable[ply][ply + --n]);
+
+        if (mate)
+            pvLength[ply] = ply + need;
+
+        return mate;
+    }
+
     // Late Move Reduction.
     //
     // Components:
@@ -650,7 +694,8 @@ namespace
             const int s = scoreFromTT(tte.score, ply);
 
             if (tte.bound == BOUND_EXACT && ply > 0
-                && (s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD))
+                && (s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD)
+                && (!pvNode || hasMateProof(pos, ply, s)))
                 return s;
 
             if (tte.depth >= depth && !pvNode)
@@ -1016,10 +1061,17 @@ namespace
             const int score = -quiescence(pos, -beta, -alpha, ply + 1);
             pos.undo_move(m);
 
-            if (score >= beta)
-                return score;
             if (score > alpha)
+            {
                 alpha = score;
+                pvTable[ply][ply] = m;
+                for (int j = ply + 1; j < pvLength[ply + 1]; ++j)
+                    pvTable[ply][j] = pvTable[ply + 1][j];
+                pvLength[ply] = pvLength[ply + 1];
+
+                if (score >= beta)
+                    return score;
+            }
         }
 
         // In check with no legal moves: checkmate.
