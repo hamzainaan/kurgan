@@ -21,6 +21,8 @@ namespace search
         int nodes = 0;    // total node limit
         int mate = 0;     // search for a mate within this many moves
         bool ponder = false;
+        // `go infinite`: keep searching until `stop`, never answer on our own.
+        bool infinite = false;
         std::vector<Move> searchmoves;
     };
 

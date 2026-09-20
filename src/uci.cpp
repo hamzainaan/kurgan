@@ -184,6 +184,8 @@ namespace
                 ss >> limits.mate;
             else if (token == "ponder")
                 limits.ponder = true;
+            else if (token == "infinite")
+                limits.infinite = true;
             else if (token == "searchmoves")
             {
                 std::string moveStr;
@@ -201,7 +203,6 @@ namespace
                 if (requested > 0 && limits.searchmoves.empty())
                     std::cout << "info string no legal searchmoves, searching all moves" << std::endl;
             }
-            // "infinite" imposes no limit here.
         }
         return limits;
     }

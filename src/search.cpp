@@ -649,18 +649,9 @@ namespace
             ttMove = tte.move;
             const int s = scoreFromTT(tte.score, ply);
 
-            if (tte.bound == BOUND_EXACT
+            if (tte.bound == BOUND_EXACT && ply > 0
                 && (s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD))
-            {
-                // The root still has to name a move. The extra MultiPV lines
-                // must walk their own moves, so leave them alone.
-                if (ply == 0 && ttMove != Move() && excludedRootMoves.empty())
-                {
-                    pvTable[0][0] = ttMove;
-                    pvLength[0] = 1;
-                }
                 return s;
-            }
 
             if (tte.depth >= depth && !pvNode)
             {
@@ -1114,8 +1105,8 @@ namespace
             if (!pos.do_move(m))
                 break;
 
-            bool repeated = false;
-            for (int i = 0; i < seenCount; ++i)
+            bool repeated = pos.isRepetition(played + 1);
+            for (int i = 0; i < seenCount && !repeated; ++i)
                 if (seen[i] == pos.zobristKey)
                     repeated = true;
             if (repeated)
@@ -1134,6 +1125,16 @@ namespace
         return played;
     }
 
+    void waitForStop()
+    {
+        if (!activeLimits.infinite && !ponderFlag.load(std::memory_order_relaxed))
+            return;
+
+        while (!stopFlag.load(std::memory_order_relaxed)
+               && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
     void iterativeDeepening(Position &pos)
     {
         nodes = 0;
@@ -1148,7 +1149,7 @@ namespace
         excludedRootMoves.clear();
         ttFilledLocal = 0;
 
-        // A root without a single legal move (checkmate/stalemate) has nothing to search.
+        // A root without a single legal move (checkmate/stalemate) has nothing to search
         bool rootHasLegalMove = false;
         {
             MoveList rootList;
@@ -1156,11 +1157,13 @@ namespace
             for (int i = 0; i < rootList.size && !rootHasLegalMove; ++i)
             {
                 Position probe = pos;
-                rootHasLegalMove = probe.do_move(rootList.moves[i]);
+                if (probe.do_move(rootList.moves[i]))
+                    rootHasLegalMove = true;
             }
         }
 
         const bool isMain = (workerId == 0);
+
         const auto start = std::chrono::steady_clock::now();
         int previousScore = 0;
 
@@ -1203,8 +1206,12 @@ namespace
                     // Report aggregate nodes across all threads so nps scales
                     // with the thread count instead of reflecting one worker's
                     // share of the work.
+                    // searchedNodes only advances in 2048-node batches (see
+                    // checkTime), so a shallow search reported "nodes 0".
+                    const uint64_t reported = searchedNodes.load(std::memory_order_relaxed)
+                                              + static_cast<uint64_t>(nodes & 2047);
                     const int pvLen = extendPVFromTT(pos, pvTable[0], pvLength[0]);
-                    printInfo(depth, score, searchedNodes.load(std::memory_order_relaxed), elapsed, pvTable[0], pvLen, mpv);
+                    printInfo(depth, score, reported, elapsed, pvTable[0], pvLen, mpv);
 
                     if (mpv == 1)
                     {
@@ -1256,6 +1263,7 @@ namespace
 
         globalNodes.fetch_add(nodes, std::memory_order_relaxed);
         ttFilled.fetch_add(ttFilledLocal, std::memory_order_relaxed);
+        waitForStop();
     }
 
     void worker(Position *pos, int id)
