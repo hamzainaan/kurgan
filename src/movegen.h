@@ -102,7 +102,7 @@ namespace movegen
     // Attack bitboard for a non-pawn piece type from a square, given occupancy.
     Bitboard attacks(PieceType pt, Square sq, Bitboard occupied);
 
-    // Squares from which a pawn of color 'c' attacks 'sq'.
+    // Squares from which a pawn of color 'c' attacks 'sq'. 
     Bitboard pawnAttacksFrom(Color c, Square sq);
 
     // True if 'sq' is attacked by color 'by'.
@@ -110,6 +110,10 @@ namespace movegen
 
     // Generate all pseudo-legal moves for the side to move.
     void generate_pseudo_legal_moves(const Position &pos, MoveList &list);
+
+    // Same moves as above in the same relative order, but only captures,
+    // promotions and en passant.
+    void generate_tactical_moves(const Position &pos, MoveList &list);
 
     // True if the pseudo-legal move leaves the mover's king out of check.
     bool is_legal(const Position &pos, Move move);

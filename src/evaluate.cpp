@@ -186,7 +186,7 @@ namespace
     constexpr int ROOK_BEHIND_ENEMY_PASSER = 5;
     constexpr int ROOK_CONNECTED = 6;
     constexpr int ROOK_TRAPPED = 7;
-    constexpr int PAWN_STRUCT_NB = 8;
+    constexpr int PAWN_STRUCT_NB = 16;
     constexpr int PAWN_BACKWARD = 0;
     constexpr int PAWN_CONNECTED = 1;
     constexpr int PAWN_PHALANX = 2;
@@ -195,6 +195,14 @@ namespace
     constexpr int PAWN_CANDIDATE_PASSER = 5;
     constexpr int PAWN_BLOCKED_PASSER = 6;
     constexpr int PAWN_KING_DISTANCE = 7;
+    constexpr int PAWN_OWN_KING_DISTANCE = 8;
+    constexpr int PAWN_ENEMY_KING_DISTANCE = 9;
+    constexpr int PAWN_KING_ESCORT = 10;
+    constexpr int PAWN_PASSER_SUPPORT = 11;
+    constexpr int PAWN_MINOR_BEHIND = 12;
+    constexpr int PAWN_PASSER_FREE = 13;
+    constexpr int PAWN_PASSER_CONTAINED = 14;
+    constexpr int PAWN_PASSER_WINS_RACE = 15;
     constexpr int THREATS_NB = 22;
     constexpr int THREAT_KNIGHT_PAWN = 0;
     constexpr int THREAT_BISHOP_PAWN = 5;
@@ -307,6 +315,10 @@ namespace
         const Bitboard enemyPawns = pos.byColor[them] & pos.byType[PAWN];
         const Bitboard theirPawnAttacks = ai.byType[them][PAWN];
         const Square theirKing = pos.kingSquare(them);
+        const Square ownKing = pos.kingSquare(c);
+        const bool kingsValid = ownKing != SQ_NONE && theirKing != SQ_NONE;
+        const Bitboard ourAttacks = ai.byType[c][PAWN] | ai.byType[c][KING] | ai.full[c];
+        Bitboard pushedPassers = 0;
 
         int isolated = 0;
         int doubled = 0;
@@ -315,6 +327,9 @@ namespace
         int blocked = 0;
         int protectedPasser = 0;
         int kingDistance = 0;
+        int ownKingDistance = 0;
+        int enemyKingDistance = 0;
+        int escort = 0;
 
         Bitboard b = pawns;
         while (b)
@@ -325,15 +340,30 @@ namespace
             const int relRank = relativeRank(c, rank);
             const Bitboard adjacent = fileMask(file - 1) | fileMask(file + 1);
             const bool defended = (movegen::pawnAttacksFrom(them, sq) & pawns) != 0;
+            const Square stop = static_cast<Square>(c == WHITE ? sq + 8 : sq - 8);
 
             if (!(pawns & adjacent))
                 ++isolated;
+
+            if (kingsValid)
+            {
+                const int d = squareDistance(stop, theirKing) * relRank
+                              - squareDistance(stop, ownKing) * (relRank - 1);
+                if (d > escort)
+                    escort = d;
+            }
 
             if (passed[c] & (1ULL << sq))
             {
                 mg += tuned::MG_PASSED[relRank];
                 eg += tuned::EG_PASSED[relRank];
                 kingDistance += squareDistance(theirKing, promotionSquare(c, sq));
+                if (kingsValid)
+                {
+                    ownKingDistance += squareDistance(stop, ownKing);
+                    enemyKingDistance += squareDistance(stop, theirKing) * relRank;
+                }
+                pushedPassers |= advanceOf(c, sq);
                 if (defended)
                     ++protectedPasser;
                 if (occ & advanceOf(c, sq))
@@ -365,8 +395,14 @@ namespace
         const int connected = popCount(pawns & ai.byType[c][PAWN]);
         const int phalanx = popCount(pawns & (pawns >> 1) & ~FILE_H_BB);
 
+        const Bitboard aheadOfPawns = (c == WHITE) ? (pawns << 8) : (pawns >> 8);
+        const int minorBehind = popCount(aheadOfPawns & pos.byColor[c]
+                                         & (pos.byType[KNIGHT] | pos.byType[BISHOP]));
+
         const int counts[PAWN_STRUCT_NB] = {backward, connected, phalanx, islands,
-                                            protectedPasser, candidate, blocked, kingDistance};
+                                            protectedPasser, candidate, blocked, kingDistance,
+                                            ownKingDistance, enemyKingDistance, escort,
+                                            popCount(ourAttacks & pushedPassers), minorBehind};
         for (int i = 0; i < PAWN_STRUCT_NB; ++i)
         {
             mg += tuned::MG_PAWN_STRUCT[i] * counts[i];
@@ -375,6 +411,52 @@ namespace
 
         mg -= tuned::MG_ISOLATED * isolated + tuned::MG_DOUBLED * doubled;
         eg -= tuned::EG_ISOLATED * isolated + tuned::EG_DOUBLED * doubled;
+    }
+
+    void passerRaceScore(const Position &pos, const AttackInfo &ai, Bitboard occ,
+                         const Bitboard passed[COLOR_NB], Color c, int &mg, int &eg)
+    {
+        const Color them = static_cast<Color>(c ^ 1);
+        const Bitboard ourPassers = pos.byColor[c] & pos.byType[PAWN] & passed[c];
+        if (ourPassers == 0)
+            return;
+
+        const Bitboard theirControl = ai.byType[them][PAWN] | ai.byType[them][KING]
+                                      | ai.full[them];
+        const Square theirKing = pos.kingSquare(them);
+
+        int free = 0;
+        int contained = 0;
+        int winsRace = 0;
+
+        Bitboard b = ourPassers;
+        while (b)
+        {
+            const Square sq = popLsb(b);
+            const int relRank = relativeRank(c, sq >> 3);
+            const Bitboard stopBit = advanceOf(c, sq);
+
+            if (!(occ & stopBit))
+            {
+                if (theirControl & stopBit)
+                    ++contained;
+                else
+                    ++free;
+
+                // The enemy king needs `squareDistance` king moves to reach the
+                // promotion square
+                if (theirKing != SQ_NONE
+                    && squareDistance(theirKing, promotionSquare(c, sq)) > 7 - relRank)
+                    ++winsRace;
+            }
+        }
+
+        mg += tuned::MG_PAWN_STRUCT[PAWN_PASSER_FREE] * free
+              + tuned::MG_PAWN_STRUCT[PAWN_PASSER_CONTAINED] * contained
+              + tuned::MG_PAWN_STRUCT[PAWN_PASSER_WINS_RACE] * winsRace;
+        eg += tuned::EG_PAWN_STRUCT[PAWN_PASSER_FREE] * free
+              + tuned::EG_PAWN_STRUCT[PAWN_PASSER_CONTAINED] * contained
+              + tuned::EG_PAWN_STRUCT[PAWN_PASSER_WINS_RACE] * winsRace;
     }
 
     void minorPieceScore(const Position &pos, const int counts[COLOR_NB][PIECE_TYPE_NB], Color c,
@@ -812,7 +894,11 @@ int evaluate::hce(const Position &pos)
     }
 
     for (int c = WHITE; c <= BLACK; ++c)
-        threatScore(pos, ai, occ, static_cast<Color>(c), mg[c], eg[c]);
+    {
+        const Color color = static_cast<Color>(c);
+        threatScore(pos, ai, occ, color, mg[c], eg[c]);
+        passerRaceScore(pos, ai, occ, passed, color, mg[c], eg[c]);
+    }
 
     for (int c = WHITE; c <= BLACK; ++c)
     {
@@ -820,7 +906,8 @@ int evaluate::hce(const Position &pos)
         const uint8_t rights = static_cast<uint8_t>(color == WHITE ? (WHITE_OO | WHITE_OOO) : (BLACK_OO | BLACK_OOO));
         int ks = 0;
         kingPawnScore(pos, color, ks);
-        ks -= kingAttackScore(pos, ai, occ, counts, static_cast<Color>(c ^ 1), ks);
+        ks -= kingAttackScore(pos, ai, occ, counts, static_cast<Color>(c ^ 1), ks)
+            * tuned::KS_ATTACK_SCALE / 100;
         ks += tuned::CASTLING_RIGHTS_VALUE[popCount(static_cast<Bitboard>(pos.castlingRights & rights))];
         ks = ks * tuned::KS_SCALE / 100;
         mg[c] += ks;

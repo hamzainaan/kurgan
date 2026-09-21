@@ -21,6 +21,8 @@ namespace search
         int nodes = 0;    // total node limit
         int mate = 0;     // search for a mate within this many moves
         bool ponder = false;
+        // `go infinite`: keep searching until `stop`, never answer on our own.
+        bool infinite = false;
         std::vector<Move> searchmoves;
     };
 
@@ -44,6 +46,15 @@ namespace search
     Move bestMove();
     uint64_t totalNodes();
 
+    // UCI spin option ranges.
+    constexpr int HASH_MIN = 1;
+    constexpr int HASH_MAX = 65536;
+    constexpr int THREADS_MIN = 1;
+    constexpr int MULTIPV_MIN = 1;
+    constexpr int MULTIPV_MAX = 64;
+
+    int clampOption(const char *name, int value, int minValue, int maxValue);
+
     // UCI options.
     void setHashSize(int megabytes);
     void setThreads(int count);
@@ -51,6 +62,7 @@ namespace search
     void setPonder(bool enabled);
     int hashSize();
     int threadCount();
+    int maxThreadCount();
     int threadSetting();
     int multiPV();
     bool ponderEnabled();

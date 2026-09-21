@@ -9,6 +9,7 @@
 #include <cstring>
 #include <iostream>
 #include <mutex>
+#include <new>
 #include <thread>
 #include <vector>
 
@@ -97,7 +98,7 @@ namespace
     std::chrono::steady_clock::time_point searchStart;
     int maxDepth = MAX_DEPTH;
     int hashSizeMb = 16;
-    int threadCountSetting = 0; // 0 = auto
+    int threadCountSetting = 1;
     int multiPVSetting = 1;
     bool ponderSetting = false;
     int64_t nodesLimit = 0;
@@ -176,6 +177,13 @@ namespace
         return k ? lsb(k) : SQ_NONE;
     }
 
+    // Hardware concurrency of the machine the engine is running on.
+    int hardwareThreads()
+    {
+        const unsigned n = std::thread::hardware_concurrency();
+        return n < 1 ? 1 : static_cast<int>(n);
+    }
+
     // True when neither side has mating material.
     bool isInsufficientMaterial(const Position &pos)
     {
@@ -220,6 +228,14 @@ namespace
     void ttStore(uint64_t key, Move move, int score, int depth, int bound, int ply)
     {
         TTEntry &e = tt[key & ttMask];
+
+        if (e.key != 0 && e.bound == BOUND_EXACT)
+        {
+            const int stored = scoreFromTT(e.score, ply);
+            const bool storedMate = stored >= MATE_THRESHOLD || stored <= -MATE_THRESHOLD;
+            if (storedMate && (e.key != key || bound != BOUND_EXACT))
+                return;
+        }
         if (e.key == 0)
         {
             // Count newly filled entries locally and flush to the shared
@@ -560,6 +576,75 @@ namespace
         return r;
     }
 
+    // True when the side to move is checkmated.
+    bool isCheckmated(Position &pos)
+    {
+        const Color us = pos.sideToMove;
+        const Square ksq = kingSquare(pos, us);
+        if (ksq == SQ_NONE || !movegen::squareAttacked(pos, ksq, static_cast<Color>(us ^ 1)))
+            return false;
+
+        MoveList list;
+        movegen::generate_pseudo_legal_moves(pos, list);
+        for (int i = 0; i < list.count(); ++i)
+            if (movegen::is_legal(pos, list[i]))
+                return false;
+
+        return true;
+    }
+
+    bool hasMateProof(Position &pos, int ply, int score)
+    {
+        const int need = (score > 0 ? MATE - score : MATE + score) - ply;
+        if (need <= 0 || need > MAX_PLY - 1 - ply)
+            return false;
+
+        const Color us = pos.sideToMove;
+        const Color mated = score > 0 ? static_cast<Color>(us ^ 1) : us;
+        int n = 0;
+        while (n < need)
+        {
+            const TTEntry &e = ttEntry(pos.zobristKey);
+            if (e.key != pos.zobristKey || e.move == Move() || !pos.do_move(e.move))
+                break;
+
+            pvTable[ply][ply + n] = e.move;
+            ++n;
+        }
+
+
+        if (n == need - 1)
+        {
+            MoveList list;
+            movegen::generate_pseudo_legal_moves(pos, list);
+            for (int i = 0; i < list.count(); ++i)
+            {
+                const Move m = list[i];
+                if (!movegen::is_legal(pos, m) || !pos.do_move(m))
+                    continue;
+
+                if (pos.sideToMove == mated && isCheckmated(pos))
+                {
+                    // Leave the move applied: the undo loop below pops it.
+                    pvTable[ply][ply + n] = m;
+                    ++n;
+                    break;
+                }
+
+                pos.undo_move(m);
+            }
+        }
+
+        const bool mate = n == need && pos.sideToMove == mated && isCheckmated(pos);
+        while (n > 0)
+            pos.undo_move(pvTable[ply][ply + --n]);
+
+        if (mate)
+            pvLength[ply] = ply + need;
+
+        return mate;
+    }
+
     // Late Move Reduction.
     //
     // Components:
@@ -641,18 +726,11 @@ namespace
             ttMove = tte.move;
             const int s = scoreFromTT(tte.score, ply);
 
-            if (tte.bound == BOUND_EXACT
-                && (s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD))
-            {
-                // The root still has to name a move. The extra MultiPV lines
-                // must walk their own moves, so leave them alone.
-                if (ply == 0 && ttMove != Move() && excludedRootMoves.empty())
-                {
-                    pvTable[0][0] = ttMove;
-                    pvLength[0] = 1;
-                }
+
+            const bool mate = s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD;
+            if (tte.bound == BOUND_EXACT && ply > 0 && mate
+                && (!pvNode || hasMateProof(pos, ply, s)))
                 return s;
-            }
 
             if (tte.depth >= depth && !pvNode)
             {
@@ -676,28 +754,32 @@ namespace
         const int staticEval = inCheck ? -MATE + ply : evaluate::evaluate(pos);
         staticEvalStack[ply] = staticEval;
         const bool improving = !inCheck && ply >= 2 && staticEval >= staticEvalStack[ply - 2];
-        const bool mateWindow = beta >= MATE_THRESHOLD;
+        const bool mateWindow = beta >= MATE_THRESHOLD || beta <= -MATE_THRESHOLD;
+
+        const Bitboard nonPawnPieces = pos.byType[KNIGHT] | pos.byType[BISHOP] |
+                                       pos.byType[ROOK] | pos.byType[QUEEN];
+        const bool hasNonPawn = (nonPawnPieces & pos.byColor[us]) != 0;
 
         if (!pvNode)
         {
             // Razoring: the static eval is so far below beta that even a
             // quiescence search cannot reach it, so its result is final.
-            if (!inCheck && depth <= tuned::RAZOR_DEPTH && staticEval + tuned::RAZOR_MARGIN < beta)
+            if (!inCheck && !mateWindow && depth <= tuned::RAZOR_DEPTH && staticEval + tuned::RAZOR_MARGIN < beta)
             {
                 const int razorScore = quiescence(pos, alpha, beta, ply);
                 if (razorScore < beta)
                     return razorScore;
             }
 
-            // Reverse Futility Pruning (parent-node futility): if the static
-            // eval is so far above beta that a shallow search cannot drop
-            // below it, return immediately.
-            if (!inCheck && depth <= tuned::RFP_DEPTH && staticEval - tuned::RFP_MARGIN * depth >= beta)
+            // Reverse Futility Pruning (parent-node futility): at pre-frontier nodes a quiet position whose eval is
+            // so far above beta that even a quiescence search cannot reach it returns immediately.
+            if (!inCheck && !mateWindow && hasNonPawn && depth <= tuned::RFP_DEPTH &&
+                staticEval - tuned::RFP_MARGIN * depth >= beta)
                 return staticEval;
 
             // Child-Node Futility Pruning: at pre-frontier nodes a quiet
             // position whose eval cannot reach alpha returns immediately.
-            if (!inCheck && depth <= tuned::FUTILITY_DEPTH && staticEval + tuned::FUTILITY_MARGIN * depth <= alpha)
+            if (!inCheck && !mateWindow && depth <= tuned::FUTILITY_DEPTH && staticEval + tuned::FUTILITY_MARGIN * depth <= alpha)
                 return staticEval;
         }
 
@@ -705,10 +787,7 @@ namespace
         // Skip in PV nodes, shallow nodes, pawn-only endings (zugzwang risk),
         // and when in check. Only try a null move when the static eval already
         // fails high; otherwise it rarely produces a cutoff.
-        const Bitboard nonPawn = pos.byType[KNIGHT] | pos.byType[BISHOP] |
-                                 pos.byType[ROOK] | pos.byType[QUEEN];
-
-        if (!pvNode && !inNullVerification && !inCheck && depth >= tuned::NMP_MIN_DEPTH && (nonPawn & pos.byColor[us]) && staticEval >= beta)
+        if (!pvNode && !inNullVerification && !inCheck && !mateWindow && depth >= tuned::NMP_MIN_DEPTH && hasNonPawn && staticEval >= beta)
         {
             // Dynamic null move reduction: deeper nodes and a larger eval
             // margin above beta allow a more aggressive reduction.
@@ -833,9 +912,9 @@ namespace
                 legalMoves >= 1 && staticEval + tuned::MOVE_FUTILITY_MARGIN * depth <= alpha)
                 continue;
 
-            // SEE-Based Quiet Pruning: skip quiet moves that hang material.
-            if (!pvNode && !inCheck && quiet && legalMoves >= 1 &&
-                depth <= tuned::SEE_QUIET_DEPTH && see::evaluate(pos, m) < 0)
+            // SEE-Based Quiet Pruning
+            if (!pvNode && !inCheck && quiet && legalMoves >= 1 && depth <= tuned::SEE_QUIET_DEPTH &&
+                see::evaluate(pos, m) < -15 * (depth - 1) * (depth - 1))
                 continue;
 
             if (ply == 0 && (!inSearchMoves(m) || isExcludedRootMove(m)))
@@ -851,6 +930,11 @@ namespace
             else if (!m.isCastling())
                 searchedCaptures[searchedCaptureCount++] = m;
 
+            const Square checkSq = kingSquare(pos, pos.sideToMove);
+            const bool givesCheck = checkSq != SQ_NONE &&
+                                    movegen::squareAttacked(pos, checkSq,
+                                                            static_cast<Color>(pos.sideToMove ^ 1));
+
             int score;
             if (legalMoves == 1)
             {
@@ -861,7 +945,7 @@ namespace
             {
                 // Late Move Reduction: reduce late, quiet moves.
                 int r = 0;
-                if (quiet)
+                if (quiet && !givesCheck)
                     r = lmrReduction(pvNode, depth, legalMoves, history[us][m.from()][moveTarget(m)]);
 
                 const int newDepth = std::max(0, depth - 1 - r);
@@ -985,7 +1069,10 @@ namespace
         }
 
         MoveList list;
-        movegen::generate_pseudo_legal_moves(pos, list);
+        if (inCheck)
+            movegen::generate_pseudo_legal_moves(pos, list);
+        else
+            movegen::generate_tactical_moves(pos, list);
 
         MovePicker picker;
         picker.init(pos, list, Move(), counter, ply, !inCheck);
@@ -1008,10 +1095,17 @@ namespace
             const int score = -quiescence(pos, -beta, -alpha, ply + 1);
             pos.undo_move(m);
 
-            if (score >= beta)
-                return score;
             if (score > alpha)
+            {
                 alpha = score;
+                pvTable[ply][ply] = m;
+                for (int j = ply + 1; j < pvLength[ply + 1]; ++j)
+                    pvTable[ply][j] = pvTable[ply + 1][j];
+                pvLength[ply] = pvLength[ply + 1];
+
+                if (score >= beta)
+                    return score;
+            }
         }
 
         // In check with no legal moves: checkmate.
@@ -1097,8 +1191,8 @@ namespace
             if (!pos.do_move(m))
                 break;
 
-            bool repeated = false;
-            for (int i = 0; i < seenCount; ++i)
+            bool repeated = pos.isRepetition(played + 1);
+            for (int i = 0; i < seenCount && !repeated; ++i)
                 if (seen[i] == pos.zobristKey)
                     repeated = true;
             if (repeated)
@@ -1117,6 +1211,16 @@ namespace
         return played;
     }
 
+    void waitForStop()
+    {
+        if (!activeLimits.infinite && !ponderFlag.load(std::memory_order_relaxed))
+            return;
+
+        while (!stopFlag.load(std::memory_order_relaxed)
+               && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
     void iterativeDeepening(Position &pos)
     {
         nodes = 0;
@@ -1131,7 +1235,41 @@ namespace
         excludedRootMoves.clear();
         ttFilledLocal = 0;
 
+        // A root without a single legal move (checkmate/stalemate) has nothing to search
+        bool rootHasLegalMove = false;
+        {
+            MoveList rootList;
+            movegen::generate_pseudo_legal_moves(pos, rootList);
+            for (int i = 0; i < rootList.size && !rootHasLegalMove; ++i)
+            {
+                Position probe = pos;
+                if (probe.do_move(rootList.moves[i]))
+                    rootHasLegalMove = true;
+            }
+        }
+
         const bool isMain = (workerId == 0);
+
+        if (isMain && rootHasLegalMove)
+        {
+            const TTEntry &e = ttEntry(pos.zobristKey);
+            if (e.key == pos.zobristKey && e.move != Move())
+            {
+                const int s = scoreFromTT(e.score, 0);
+                if ((s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD) && hasMateProof(pos, 0, s))
+                {
+                    seldepth = pvLength[0];
+                    printInfo(1, s, searchedNodes.load(std::memory_order_relaxed), 0, pvTable[0], pvLength[0]);
+                    std::lock_guard<std::mutex> lock(bestMutex);
+                    if (1 > completedDepth)
+                    {
+                        completedDepth = 1;
+                        finalBestMove = pvTable[0][0];
+                    }
+                }
+            }
+        }
+
         const auto start = std::chrono::steady_clock::now();
         int previousScore = 0;
 
@@ -1174,8 +1312,12 @@ namespace
                     // Report aggregate nodes across all threads so nps scales
                     // with the thread count instead of reflecting one worker's
                     // share of the work.
+                    // searchedNodes only advances in 2048-node batches (see
+                    // checkTime), so a shallow search reported "nodes 0".
+                    const uint64_t reported = searchedNodes.load(std::memory_order_relaxed)
+                                              + static_cast<uint64_t>(nodes & 2047);
                     const int pvLen = extendPVFromTT(pos, pvTable[0], pvLength[0]);
-                    printInfo(depth, score, searchedNodes.load(std::memory_order_relaxed), elapsed, pvTable[0], pvLen, mpv);
+                    printInfo(depth, score, reported, elapsed, pvTable[0], pvLen, mpv);
 
                     if (mpv == 1)
                     {
@@ -1201,6 +1343,10 @@ namespace
             if (stopFlag.load(std::memory_order_relaxed))
                 break;
 
+            // Nothing was searched at this depth.
+            if (!rootHasLegalMove)
+                break;
+
             if (isMain && depth >= 4 &&
                 !(ponderFlag.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed)))
             {
@@ -1223,6 +1369,7 @@ namespace
 
         globalNodes.fetch_add(nodes, std::memory_order_relaxed);
         ttFilled.fetch_add(ttFilledLocal, std::memory_order_relaxed);
+        waitForStop();
     }
 
     void worker(Position *pos, int id)
@@ -1230,6 +1377,18 @@ namespace
         workerId = id;
         iterativeDeepening(*pos);
     }
+}
+
+int search::clampOption(const char *name, int value, int minValue, int maxValue)
+{
+    const int clamped = std::clamp(value, minValue, maxValue);
+    if (clamped != value)
+    {
+        std::lock_guard<std::mutex> lock(outputMutex);
+        std::cout << "info string " << name << " value " << value << " is out of range ["
+                  << minValue << ", " << maxValue << "], set to " << clamped << std::endl;
+    }
+    return clamped;
 }
 
 void search::init()
@@ -1253,6 +1412,34 @@ void search::go(const Position &root, const SearchLimits &limits)
     }
 
     activeLimits = limits;
+
+    // A searchmoves list without a single legal root move would leave the root
+    // with nothing to search.
+    if (!activeLimits.searchmoves.empty())
+    {
+        std::vector<Move> usable;
+        for (Move requested : activeLimits.searchmoves)
+        {
+            Position probe = root;
+            if (probe.do_move(requested))
+                usable.push_back(requested);
+        }
+
+        if (usable.empty())
+        {
+            activeLimits.searchmoves.clear();
+            if (!silentOutput)
+            {
+                std::lock_guard<std::mutex> lock(outputMutex);
+                std::cout << "info string no legal searchmoves, searching all moves" << std::endl;
+            }
+        }
+        else
+        {
+            activeLimits.searchmoves = std::move(usable);
+        }
+    }
+
     activeUs = root.sideToMove;
     nodesLimit = limits.nodes;
     mateGoal = limits.mate;
@@ -1336,25 +1523,34 @@ uint64_t search::totalNodes()
 
 void search::setHashSize(int megabytes)
 {
-    if (megabytes < 1)
-        megabytes = 1;
-    if (megabytes > 65536)
-        megabytes = 65536;
-    if (megabytes != hashSizeMb)
+    megabytes = clampOption("Hash", megabytes, HASH_MIN, HASH_MAX);
+    if (megabytes == hashSizeMb)
+        return;
+
+    // The table is allocated lazily; only a live table can fail to grow.
+    if (tt.empty())
     {
         hashSizeMb = megabytes;
-        if (!tt.empty())
-            ttResize(static_cast<size_t>(hashSizeMb));
+        return;
     }
+
+    try
+    {
+        ttResize(static_cast<size_t>(megabytes));
+    }
+    catch (const std::bad_alloc &)
+    {
+        std::lock_guard<std::mutex> lock(outputMutex);
+        std::cout << "info string Hash " << megabytes << " MB could not be allocated, keeping "
+                  << hashSizeMb << " MB" << std::endl;
+        return;
+    }
+    hashSizeMb = megabytes;
 }
 
 void search::setThreads(int count)
 {
-    if (count < 0)
-        count = 0;
-    if (count > 256)
-        count = 256;
-    threadCountSetting = count;
+    threadCountSetting = clampOption("Threads", count, THREADS_MIN, maxThreadCount());
 }
 
 int search::threadSetting()
@@ -1374,24 +1570,17 @@ int search::hashSize()
 
 int search::threadCount()
 {
-    if (threadCountSetting > 0)
-        return threadCountSetting;
+    return threadCountSetting;
+}
 
-    unsigned n = std::thread::hardware_concurrency();
-    if (n < 1)
-        n = 1;
-    if (n > 32)
-        n = 32;
-    return static_cast<int>(n);
+int search::maxThreadCount()
+{
+    return hardwareThreads();
 }
 
 void search::setMultiPV(int value)
 {
-    if (value < 1)
-        value = 1;
-    if (value > 64)
-        value = 64;
-    multiPVSetting = value;
+    multiPVSetting = clampOption("MultiPV", value, MULTIPV_MIN, MULTIPV_MAX);
 }
 
 void search::setPonder(bool enabled)
@@ -1442,7 +1631,7 @@ bool search::setTuningOption(const std::string &name, int value)
     {
         if (name == p.name)
         {
-            *p.value = std::clamp(value, p.minValue, p.maxValue);
+            *p.value = clampOption(p.name, value, p.minValue, p.maxValue);
             return true;
         }
     }

@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -68,6 +69,9 @@ namespace
             if (m.from() != from)
                 continue;
 
+            if (!movegen::is_legal(pos, m))
+                continue;
+
             if (m.isCastling())
             {
                 if (movegen::chess960() ? m.to() == to
@@ -103,16 +107,34 @@ namespace
         else if (token == "fen")
         {
             std::string fen;
-            for (int i = 0; i < 6; ++i)
+            for (int i = 0; i < 4; ++i)
             {
                 std::string part;
                 if (!(ss >> part))
-                    break;
+                {
+                    std::cout << "info string invalid fen '" << fen << '\'' << std::endl;
+                    return;
+                }
                 if (i > 0)
                     fen += ' ';
                 fen += part;
             }
-            pos.set_fen(fen);
+
+            for (int i = 0; i < 2; ++i)
+            {
+                ss >> std::ws;
+                const int next = ss.peek();
+                if (next == EOF || next < '0' || next > '9')
+                    break;
+                std::string part;
+                ss >> part;
+                fen += ' ';
+                fen += part;
+            }
+
+            // A rejected FEN used to leave the previous position.
+            if (!pos.set_fen(fen))
+                std::cout << "info string invalid fen '" << fen << '\'' << std::endl;
         }
         else
         {
@@ -126,8 +148,17 @@ namespace
             while (ss >> moveStr)
             {
                 const Move m = parseMove(pos, moveStr);
-                if (m.from() == m.to() || !pos.do_move(m))
+                if (m.from() == m.to())
+                {
+                    // Never stop silently
+                    std::cout << "info string invalid move '" << moveStr << '\'' << std::endl;
                     break;
+                }
+                if (!pos.do_move(m))
+                {
+                    std::cout << "info string illegal move '" << moveStr << '\'' << std::endl;
+                    break;
+                }
             }
         }
     }
@@ -156,17 +187,25 @@ namespace
                 ss >> limits.mate;
             else if (token == "ponder")
                 limits.ponder = true;
+            else if (token == "infinite")
+                limits.infinite = true;
             else if (token == "searchmoves")
             {
                 std::string moveStr;
+                int requested = 0;
                 while (ss >> moveStr)
                 {
+                    ++requested;
                     const Move m = parseMove(pos, moveStr);
-                    if (m.from() != m.to())
+                    if (m.from() == m.to())
+                        std::cout << "info string invalid searchmoves '" << moveStr << '\'' << std::endl;
+                    else
                         limits.searchmoves.push_back(m);
                 }
+                // Say so out loud, because the caller asked for one.
+                if (requested > 0 && limits.searchmoves.empty())
+                    std::cout << "info string no legal searchmoves, searching all moves" << std::endl;
             }
-            // "infinite" imposes no limit here.
         }
         return limits;
     }
@@ -207,11 +246,14 @@ void uci::loop()
         {
             std::cout << "id name Kurgan " << KURGAN_VERSION << std::endl;
             std::cout << "id author Hamza Inan" << std::endl;
-            std::cout << "option name Hash type spin default 16 min 1 max 65536" << std::endl;
-            std::cout << "option name Threads type spin default 1 min 1 max 256" << std::endl;
+            std::cout << "option name Hash type spin default 16 min " << search::HASH_MIN
+                      << " max " << search::HASH_MAX << std::endl;
+            std::cout << "option name Threads type spin default 1 min " << search::THREADS_MIN
+                      << " max " << search::maxThreadCount() << std::endl;
             std::cout << "option name Ponder type check default false" << std::endl;
             std::cout << "option name UCI_Chess960 type check default false" << std::endl;
-            std::cout << "option name MultiPV type spin default 1 min 1 max 64" << std::endl;
+            std::cout << "option name MultiPV type spin default 1 min " << search::MULTIPV_MIN
+                      << " max " << search::MULTIPV_MAX << std::endl;
             std::cout << "option name Clear Hash type button" << std::endl;
             std::cout << "option name EvalFile type string default " << DEFAULT_NET << std::endl;
             std::cout << "option name Use NNUE type check default true" << std::endl;
@@ -289,12 +331,12 @@ void uci::loop()
                 }
                 else if (name == "Use NNUE")
                     nnue::setEnabled(value == "true");
-                else
-                    search::setTuningOption(name, std::stoi(value));
+                else if (!search::setTuningOption(name, std::stoi(value)))
+                    std::cout << "info string unknown option " << name << std::endl;
             }
-            catch (...)
+            catch (const std::exception &)
             {
-                // Ignore malformed option values.
+                std::cout << "info string invalid value '" << value << "' for option " << name << std::endl;
             }
         }
         else if (cmd == "position")

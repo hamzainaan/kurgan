@@ -413,7 +413,10 @@ void Position::undo_move(Move move)
     // Remove moved piece from destination and restore any captured piece.
     removePiece(to);
     if (move.isEnPassant())
-        putPiece(undo.capturedPiece, static_cast<Square>(to + (us == WHITE ? -8 : 8)));
+    {
+        if (undo.capturedPiece != NO_PIECE)
+            putPiece(undo.capturedPiece, static_cast<Square>(to + (us == WHITE ? -8 : 8)));
+    }
     else if (undo.capturedPiece != NO_PIECE)
         putPiece(undo.capturedPiece, to);
 
@@ -483,8 +486,14 @@ bool Position::set_fen(const std::string &fen)
 {
     std::istringstream ss(fen);
     std::string boardStr, sideStr, castlingStr, epStr, halfmoveStr, fullmoveStr;
-    if (!(ss >> boardStr >> sideStr >> castlingStr >> epStr >> halfmoveStr >> fullmoveStr))
+    if (!(ss >> boardStr >> sideStr >> castlingStr >> epStr))
         return false;
+
+    // The halfmove clock and the fullmove number are optional in UCI.
+    if (!(ss >> halfmoveStr))
+        halfmoveStr = "0";
+    if (!(ss >> fullmoveStr))
+        fullmoveStr = "1";
 
     initZobrist();
     clear();
@@ -606,6 +615,16 @@ bool Position::set_fen(const std::string &fen)
         if (f < FILE_A || f >= FILE_NB || r < RANK_1 || r >= RANK_NB)
             return false;
         enPassantSquare = makeSquare(static_cast<File>(f), static_cast<Rank>(r));
+
+        const Color them = static_cast<Color>(sideToMove ^ 1);
+        const int victim = static_cast<int>(enPassantSquare) + (sideToMove == WHITE ? -8 : 8);
+
+        const bool capturable = r == (sideToMove == WHITE ? RANK_6 : RANK_3)
+            && (movegen::pawnAttacksFrom(them, enPassantSquare) & byColor[sideToMove]
+                & byType[PAWN])
+            && (byColor[them] & byType[PAWN] & (1ULL << victim));
+        if (!capturable)
+            enPassantSquare = SQ_NONE;
     }
 
     // 5. Halfmove clock and fullmove number.
