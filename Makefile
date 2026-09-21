@@ -36,6 +36,15 @@ ifneq ($(STAMP_TEXT),$(shell cat $(VERSION_STAMP) 2>/dev/null))
   $(shell printf '%s' '$(STAMP_TEXT)' > $(VERSION_STAMP))
 endif
 
+# Every variant links to the same output name, so a variant change has to relink
+# even though all of its objects are older than the binary already sitting there.
+VARIANT_STAMP := $(BUILD_DIR)/.variant-stamp
+
+ifneq ($(VARIANT),$(shell cat $(VARIANT_STAMP) 2>/dev/null))
+  $(shell mkdir -p $(BUILD_DIR))
+  $(shell printf '%s' '$(VARIANT)' > $(VARIANT_STAMP))
+endif
+
 # ------------------------------------------------------------------
 # Platform detection (Unix, macOS, Windows)
 # ------------------------------------------------------------------
@@ -147,7 +156,7 @@ endif
 # ------------------------------------------------------------------
 all: $(EXE)
 
-$(EXE): $(OBJS)
+$(EXE): $(OBJS) $(VARIANT_STAMP)
 	$(LINK)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | $(OBJ_DIR)
