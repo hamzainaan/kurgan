@@ -7,10 +7,17 @@ ENGINE   := kurgan
 CXX      ?= g++
 CXXFLAGS ?=
 
+# Evaluation back ends: NNUE=1 compiles the network support in, HCE=0 removes
+# the hand-crafted evaluation. Each combination gets its own object directory.
+NNUE ?= 1
+HCE  ?= 1
+FEATURE_DEFS := $(if $(filter 1,$(NNUE)),-DKURGAN_NNUE) $(if $(filter 0,$(HCE)),-DKURGAN_HCE_OFF)
+VARIANT  := nnue$(NNUE)-hce$(HCE)
+
 MODE      ?= release
 SRC_DIR   := src
 BUILD_DIR := build
-OBJ_DIR   := $(BUILD_DIR)/obj/$(MODE)
+OBJ_DIR   := $(BUILD_DIR)/obj/$(MODE)/$(VARIANT)
 
 SRCS := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRCS))
@@ -27,6 +34,15 @@ ifneq ($(STAMP_TEXT),$(shell cat $(VERSION_STAMP) 2>/dev/null))
   $(shell mkdir -p $(BUILD_DIR))
   $(shell printf '#pragma once\n\n#define KURGAN_VERSION "%s"\n#define KURGAN_BUILD "%s"\n' '$(VERSION)' '$(BUILD_AT)' > $(VERSION_H))
   $(shell printf '%s' '$(STAMP_TEXT)' > $(VERSION_STAMP))
+endif
+
+# Every variant links to the same output name, so a variant change has to relink
+# even though all of its objects are older than the binary already sitting there.
+VARIANT_STAMP := $(BUILD_DIR)/.variant-stamp
+
+ifneq ($(VARIANT),$(shell cat $(VARIANT_STAMP) 2>/dev/null))
+  $(shell mkdir -p $(BUILD_DIR))
+  $(shell printf '%s' '$(VARIANT)' > $(VARIANT_STAMP))
 endif
 
 # ------------------------------------------------------------------
@@ -62,7 +78,7 @@ endif
 # ------------------------------------------------------------------
 ifeq ($(COMPILER),msvc)
   EXE      := $(ENGINE).exe
-  CPPFLAGS := /I$(SRC_DIR) /I$(BUILD_DIR) /nologo /EHsc
+  CPPFLAGS := /I$(SRC_DIR) /I$(BUILD_DIR) /nologo /EHsc $(FEATURE_DEFS)
   CXXSTD   := /std:c++latest
   WARNINGS := /W3
   MKDIR    := mkdir -p
@@ -92,7 +108,7 @@ else
     LDFLAGS += -pthread
   endif
 
-  CPPFLAGS := -I$(SRC_DIR) -I$(BUILD_DIR)
+  CPPFLAGS := -I$(SRC_DIR) -I$(BUILD_DIR) $(FEATURE_DEFS)
   CXXSTD   := -std=c++23
   WARNINGS := -Wall -Wextra -Wshadow -Wconversion
   LTO      ?= -flto
@@ -140,7 +156,7 @@ endif
 # ------------------------------------------------------------------
 all: $(EXE)
 
-$(EXE): $(OBJS)
+$(EXE): $(OBJS) $(VARIANT_STAMP)
 	$(LINK)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | $(OBJ_DIR)

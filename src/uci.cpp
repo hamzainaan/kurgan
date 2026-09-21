@@ -3,12 +3,14 @@
 #include "bench.h"
 #include "evaluate.h"
 #include "movegen.h"
+#include "nnue.h"
 #include "perft.h"
 #include "position.h"
 #include "search.h"
 #include "version.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -18,6 +20,7 @@
 namespace
 {
     constexpr const char *START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    constexpr const char *DEFAULT_NET = "net.knnue";
 
     // Convert a UCI move string ("e2e4", "e7e8q") into a Move by matching the
     // pseudo-legal move list of the current position.
@@ -212,6 +215,11 @@ void uci::loop()
 {
     search::init();
 
+    if (const char *path = std::getenv("KURGAN_NNUE"))
+        nnue::load(path);
+    else
+        nnue::load(DEFAULT_NET);
+
     Position pos;
     pos.set_fen(START_FEN);
 
@@ -247,7 +255,15 @@ void uci::loop()
             std::cout << "option name MultiPV type spin default 1 min " << search::MULTIPV_MIN
                       << " max " << search::MULTIPV_MAX << std::endl;
             std::cout << "option name Clear Hash type button" << std::endl;
+            std::cout << "option name EvalFile type string default " << DEFAULT_NET << std::endl;
+            std::cout << "option name Use NNUE type check default true" << std::endl;
             std::cout << search::tuningOptionsUci();
+            if (nnue::loaded())
+                std::cout << "info string EvalFile " << nnue::file() << " id " << std::hex << nnue::hash()
+                          << std::dec << std::endl;
+            else
+                std::cout << "info string evaluation " << evaluate::name() << " ("
+                          << (nnue::supported() ? nnue::error() : "NNUE not compiled in") << ")" << std::endl;
             std::cout << "uciok" << std::endl;
         }
         else if (cmd == "isready")
@@ -308,6 +324,13 @@ void uci::loop()
                     search::setMultiPV(std::stoi(value));
                 else if (name == "Clear Hash")
                     search::clear();
+                else if (name == "EvalFile")
+                {
+                    if (!value.empty() && !nnue::load(value))
+                        std::cout << "info string NNUE load failed: " << nnue::error() << std::endl;
+                }
+                else if (name == "Use NNUE")
+                    nnue::setEnabled(value == "true");
                 else if (!search::setTuningOption(name, std::stoi(value)))
                     std::cout << "info string unknown option " << name << std::endl;
             }
@@ -379,7 +402,13 @@ void uci::loop()
         else if (cmd == "eval")
         {
             joinSearch();
+#ifdef KURGAN_HCE_OFF
             std::cout << "eval " << evaluate::evaluate(pos) << std::endl;
+#else
+            std::cout << "eval " << evaluate::hce(pos) << std::endl;
+#endif
+            if (nnue::loaded())
+                std::cout << "eval nnue " << nnue::evaluate(pos) << std::endl;
         }
         else if (cmd == "debug")
         {

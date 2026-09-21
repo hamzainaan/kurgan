@@ -1,5 +1,9 @@
 #include "evaluate.h"
 
+#include "nnue.h"
+
+#ifndef KURGAN_HCE_OFF
+
 #include "movegen.h"
 #include "position.h"
 #include "tuned_params.h"
@@ -834,7 +838,7 @@ namespace
     }
 }
 
-int evaluate::evaluate(const Position &pos)
+int evaluate::hce(const Position &pos)
 {
     const Color us = pos.sideToMove;
 
@@ -920,4 +924,29 @@ int evaluate::evaluate(const Position &pos)
 
     const int stmScore = (us == WHITE) ? score : -score;
     return stmScore + tuned::TEMPO;
+}
+
+#endif // KURGAN_HCE_OFF
+
+int evaluate::evaluate(const Position &pos)
+{
+#ifdef KURGAN_NNUE
+    if (nnue::active())
+        return nnue::evaluate(pos);
+#endif
+#ifdef KURGAN_HCE_OFF
+    (void) pos;
+    return 0;
+#else
+    return hce(pos);
+#endif
+}
+
+const char *evaluate::name()
+{
+#ifdef KURGAN_NNUE
+    if (nnue::active())
+        return "nnue";
+#endif
+    return "hce";
 }
