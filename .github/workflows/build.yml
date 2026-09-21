@@ -78,7 +78,7 @@ jobs:
           msystem: UCRT64
           update: true
           install: make mingw-w64-ucrt-x86_64-gcc
-      - run: make VERSION=1-j"$(nproc)" MODE=release TIER=${{ matrix.tier }} CXX=x86_64-w64-mingw32-g++ CXXFLAGS=-static
+      - run: make VERSION=1 -j"$(nproc)" MODE=release TIER=${{ matrix.tier }} CXX=x86_64-w64-mingw32-g++ CXXFLAGS=-static
       - if: matrix.verify
         run: printf 'bench\nquit\n' | ./kurgan.exe | grep -q "Nodes searched"
       - run: cp kurgan.exe kurgan-${{ matrix.target }}.exe

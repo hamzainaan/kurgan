@@ -7,12 +7,12 @@ ENGINE   := kurgan
 CXX      ?= g++
 CXXFLAGS ?=
 
-# Evaluation back ends: NNUE=1 compiles the network support in, HCE=0 removes
-# the hand-crafted evaluation. Each combination gets its own object directory.
-NNUE ?= 1
-HCE  ?= 1
-FEATURE_DEFS := $(if $(filter 1,$(NNUE)),-DKURGAN_NNUE) $(if $(filter 0,$(HCE)),-DKURGAN_HCE_OFF)
-VARIANT  := nnue$(NNUE)-hce$(HCE)
+TIER ?= native
+
+EMBED_NET := src/net.knnue
+
+FEATURE_DEFS := -DKURGAN_NNUE -DKURGAN_EMBEDDED_NET
+VARIANT  := $(TIER)
 
 MODE      ?= release
 SRC_DIR   := src
@@ -73,6 +73,10 @@ else
   COMPILER := gcc
 endif
 
+ifeq ($(COMPILER),msvc)
+  $(error the embedded net needs g++ or clang++, MSVC cannot .incbin a net)
+endif
+
 # ------------------------------------------------------------------
 # Build modes
 # ------------------------------------------------------------------
@@ -98,8 +102,9 @@ ifeq ($(COMPILER),msvc)
 
   ALLFLAGS := $(CXXSTD) $(WARNINGS) $(OPT) $(CPPFLAGS) $(CXXFLAGS)
   LDFLAGS  := /link /LTCG
+  LINK_OBJS := $(OBJS)
   COMPILE  = $(CXX) $(ALLFLAGS) /c $< /Fo$@
-  LINK     = $(CXX) $(OBJS) /Fe$@ $(LDFLAGS)
+  LINK     = $(CXX) $(LINK_OBJS) /Fe$@ $(LDFLAGS)
 else
   ifeq ($(PLATFORM),windows)
     EXE := $(ENGINE).exe
@@ -115,13 +120,11 @@ else
   MKDIR    := mkdir -p
   DEPS     := $(OBJS:.o=.d)
 
-  TIER ?= native
   ifeq ($(TIER),native)
     ARCHFLAGS := -march=native
   else ifeq ($(TIER),baseline)
     ARCHFLAGS :=
-  else ifeq ($(TIER),sse42)
-    ARCHFLAGS := -march=x86-64-v2
+  else ifeq ($(TIER),sse42)    ARCHFLAGS := -march=x86-64-v2
   else ifeq ($(TIER),avx2)
     ARCHFLAGS := -march=x86-64-v3
   else ifeq ($(TIER),avx512)
@@ -147,8 +150,10 @@ else
   endif
 
   ALLFLAGS := $(CXXSTD) $(WARNINGS) $(OPT) $(CPPFLAGS) $(CXXFLAGS)
+  NET_OBJ  := $(BUILD_DIR)/net.o
+  LINK_OBJS := $(OBJS) $(NET_OBJ)
   COMPILE  = $(CXX) $(ALLFLAGS) -MMD -MP -c $< -o $@
-  LINK     = $(CXX) $(ALLFLAGS) $(OBJS) -o $@ $(LDFLAGS)
+  LINK     = $(CXX) $(ALLFLAGS) $(LINK_OBJS) -o $@ $(LDFLAGS)
 endif
 
 # ------------------------------------------------------------------
@@ -156,7 +161,7 @@ endif
 # ------------------------------------------------------------------
 all: $(EXE)
 
-$(EXE): $(OBJS) $(VARIANT_STAMP)
+$(EXE): $(LINK_OBJS) $(VARIANT_STAMP)
 	$(LINK)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | $(OBJ_DIR)
@@ -164,6 +169,13 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | $(OBJ_DIR)
 
 $(OBJ_DIR):
 	$(MKDIR) $(OBJ_DIR)
+
+# Mach-O wants its own section directive and a leading underscore on symbols.
+$(BUILD_DIR)/net.S: $(EMBED_NET) | $(OBJ_DIR)
+	printf '#ifdef __APPLE__\n\t.const_data\n\t.globl _kEmbeddedNet\n_kEmbeddedNet:\n\t.incbin "%s"\n\t.globl _kEmbeddedNetEnd\n_kEmbeddedNetEnd:\n#else\n\t.section .rodata\n\t.globl kEmbeddedNet\nkEmbeddedNet:\n\t.incbin "%s"\n\t.globl kEmbeddedNetEnd\nkEmbeddedNetEnd:\n#endif\n' '$(EMBED_NET)' '$(EMBED_NET)' > $@
+
+$(BUILD_DIR)/net.o: $(BUILD_DIR)/net.S
+	$(CXX) $(ARCHFLAGS) $(CXXFLAGS) -c $< -o $@
 
 # Profile-guided optimisation flow:
 #   1. make MODE=profile-gen

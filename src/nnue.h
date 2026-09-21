@@ -1,26 +1,36 @@
 #pragma once
 
+#include "types.h"
+
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
 class Position;
 
-// KNet v1
+// KNet v2: the architecture Bullet emits. Eight vertical king buckets, each
+// perspective mirroring the king file, 256 hidden units, an output bucket per
+// four pieces on the board and squared clipped ReLU.
 namespace nnue
 {
-    constexpr int KING_BUCKETS = 32;
-    constexpr int PIECE_CODES = 10;
-    constexpr int KING_PAWN_DIM = 16;
-    constexpr int GROUP_A_SIZE = KING_BUCKETS * PIECE_CODES * 64;
-    constexpr int GROUP_B_SIZE = KING_BUCKETS * KING_PAWN_DIM;
-    constexpr int PERSPECTIVE_SIZE = GROUP_A_SIZE + GROUP_B_SIZE;
-    constexpr int INPUT_SIZE = 2 * PERSPECTIVE_SIZE;
+    constexpr int KING_BUCKETS = 8;
+    constexpr int FEATURES_PER_BUCKET = 768;
+    constexpr int INPUT_SIZE = KING_BUCKETS * FEATURES_PER_BUCKET; // 6144
     constexpr int HALF_DIM = 256;
-    constexpr int L2_DIM = 16;
     constexpr int OUTPUT_BUCKETS = 8;
-    constexpr int MAX_MATERIAL = 24;
 
-    constexpr uint8_t MAX_ACTIVATION = 127;
+    constexpr int PIECE_STRIDE = 64;
+    constexpr int COLOUR_STRIDE = 6 * PIECE_STRIDE; // 384
+
+    // Quantisation of the trainer's export: QA scales the features, QB the head.
+    constexpr int QA = 255;
+    constexpr int QB = 64;
+    constexpr int EVAL_SCALE = 400;
+    constexpr int64_t HEAD_DIVISOR = static_cast<int64_t>(QA) * QA * QB;
+
+    // Headerless little-endian int16 payload of one quantised Bullet network.
+    constexpr size_t NET_SIZE = static_cast<size_t>(INPUT_SIZE) * HALF_DIM * 2 + HALF_DIM * 2
+        + static_cast<size_t>(OUTPUT_BUCKETS) * 2 * HALF_DIM * 2 + OUTPUT_BUCKETS * 2;
 
     constexpr bool supported()
     {
@@ -31,8 +41,10 @@ namespace nnue
 #endif
     }
 
-    // Load a network file; returns false (and unloads) on any format error.
-    bool load(const std::string &path);
+    bool loadFromMemory(const uint8_t *data, size_t size, const std::string &name);
+
+    bool loadEmbedded();
+
     void unload();
     bool loaded();
 
@@ -53,4 +65,10 @@ namespace nnue
 
     // Network evaluation in engine centipawns from the side to move.
     int evaluate(const Position &pos);
+
+    // Incremental accumulator. A position binds itself with track() once its
+    // board is set up and reports every piece change with update(); the values
+    // are rebuilt lazily, the first time the position is actually evaluated.
+    void track(const Position &pos);
+    void update(const Position &pos, Piece piece, Square square, bool add);
 }

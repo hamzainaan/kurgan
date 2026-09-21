@@ -20,7 +20,6 @@
 namespace
 {
     constexpr const char *START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-    constexpr const char *DEFAULT_NET = "net.knnue";
 
     // Convert a UCI move string ("e2e4", "e7e8q") into a Move by matching the
     // pseudo-legal move list of the current position.
@@ -215,10 +214,7 @@ void uci::loop()
 {
     search::init();
 
-    if (const char *path = std::getenv("KURGAN_NNUE"))
-        nnue::load(path);
-    else
-        nnue::load(DEFAULT_NET);
+    nnue::loadEmbedded();
 
     Position pos;
     pos.set_fen(START_FEN);
@@ -255,12 +251,11 @@ void uci::loop()
             std::cout << "option name MultiPV type spin default 1 min " << search::MULTIPV_MIN
                       << " max " << search::MULTIPV_MAX << std::endl;
             std::cout << "option name Clear Hash type button" << std::endl;
-            std::cout << "option name EvalFile type string default " << DEFAULT_NET << std::endl;
             std::cout << "option name Use NNUE type check default true" << std::endl;
             std::cout << search::tuningOptionsUci();
             if (nnue::loaded())
-                std::cout << "info string EvalFile " << nnue::file() << " id " << std::hex << nnue::hash()
-                          << std::dec << std::endl;
+                std::cout << "info string evaluation nnue (" << nnue::file() << ") id " << std::hex
+                          << nnue::hash() << std::dec << std::endl;
             else
                 std::cout << "info string evaluation " << evaluate::name() << " ("
                           << (nnue::supported() ? nnue::error() : "NNUE not compiled in") << ")" << std::endl;
@@ -324,11 +319,6 @@ void uci::loop()
                     search::setMultiPV(std::stoi(value));
                 else if (name == "Clear Hash")
                     search::clear();
-                else if (name == "EvalFile")
-                {
-                    if (!value.empty() && !nnue::load(value))
-                        std::cout << "info string NNUE load failed: " << nnue::error() << std::endl;
-                }
                 else if (name == "Use NNUE")
                     nnue::setEnabled(value == "true");
                 else if (!search::setTuningOption(name, std::stoi(value)))
