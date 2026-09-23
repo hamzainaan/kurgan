@@ -247,8 +247,11 @@ namespace
             // Count newly filled entries locally and flush to the shared
             // counter only periodically: a per-store atomic RMW would
             // serialize all threads on one cache line and tank nps.
-            if ((++ttFilledLocal & 1023) == 0)
+            if (++ttFilledLocal == 1024)
+            {
                 ttFilled.fetch_add(1024, std::memory_order_relaxed);
+                ttFilledLocal = 0;
+            }
         }
         e.key = key;
         e.move = move;
