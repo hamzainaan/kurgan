@@ -100,6 +100,7 @@ namespace
     int hashSizeMb = 16;
     int threadCountSetting = 1;
     int multiPVSetting = 1;
+    int contemptSetting = 0;
     bool ponderSetting = false;
     int64_t nodesLimit = 0;
     int mateGoal = 0;
@@ -213,6 +214,11 @@ namespace
         }
 
         return false;
+    }
+
+    int drawScore(const Position &pos)
+    {
+        return pos.sideToMove == activeUs ? -contemptSetting : contemptSetting;
     }
 
     int scoreFromTT(int s, int ply)
@@ -712,11 +718,12 @@ namespace
         // Deterministic draws are cached in the transposition table.
         if (ply > 0 && (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos)))
         {
-            ttStore(key, Move(), 0, depth, BOUND_EXACT, ply);
-            return 0;
+            const int draw = drawScore(pos);
+            ttStore(key, Move(), draw, depth, BOUND_EXACT, ply);
+            return draw;
         }
         if (ply > 0 && pos.isRepetition(ply))
-            return 0;
+            return drawScore(pos);
 
         // Transposition table probe.
         TTEntry &tte = ttEntry(key);
@@ -1057,7 +1064,7 @@ namespace
         const Move counter = prevMove == Move() ? Move() : counterMoves[us][prevMove.from()][moveTarget(prevMove)];
 
         if (pos.halfmoveClock >= 100 || pos.isRepetition(ply) || isInsufficientMaterial(pos))
-            return 0;
+            return drawScore(pos);
 
         const int standPat = evaluate::evaluate(pos);
         if (!inCheck)
@@ -1581,6 +1588,21 @@ int search::maxThreadCount()
 void search::setMultiPV(int value)
 {
     multiPVSetting = clampOption("MultiPV", value, MULTIPV_MIN, MULTIPV_MAX);
+}
+
+void search::setContempt(int value)
+{
+    const int clamped = clampOption("Contempt", value, CONTEMPT_MIN, CONTEMPT_MAX);
+    if (clamped != contemptSetting)
+    {
+        contemptSetting = clamped;
+        clear();
+    }
+}
+
+int search::contempt()
+{
+    return contemptSetting;
 }
 
 void search::setPonder(bool enabled)

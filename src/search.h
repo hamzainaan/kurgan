@@ -52,6 +52,8 @@ namespace search
     constexpr int THREADS_MIN = 1;
     constexpr int MULTIPV_MIN = 1;
     constexpr int MULTIPV_MAX = 64;
+    constexpr int CONTEMPT_MIN = -200;
+    constexpr int CONTEMPT_MAX = 200;
 
     int clampOption(const char *name, int value, int minValue, int maxValue);
 
@@ -59,12 +61,14 @@ namespace search
     void setHashSize(int megabytes);
     void setThreads(int count);
     void setMultiPV(int value);
+    void setContempt(int value);
     void setPonder(bool enabled);
     int hashSize();
     int threadCount();
     int maxThreadCount();
     int threadSetting();
     int multiPV();
+    int contempt();
     bool ponderEnabled();
 
     // Suppress all search output (used by the benchmark).

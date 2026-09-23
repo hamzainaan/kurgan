@@ -250,6 +250,8 @@ void uci::loop()
             std::cout << "option name UCI_Chess960 type check default false" << std::endl;
             std::cout << "option name MultiPV type spin default 1 min " << search::MULTIPV_MIN
                       << " max " << search::MULTIPV_MAX << std::endl;
+            std::cout << "option name Contempt type spin default 0 min " << search::CONTEMPT_MIN
+                      << " max " << search::CONTEMPT_MAX << std::endl;
             std::cout << "option name Clear Hash type button" << std::endl;
             std::cout << "option name Use NNUE type check default true" << std::endl;
             std::cout << search::tuningOptionsUci();
@@ -317,6 +319,8 @@ void uci::loop()
                     movegen::setChess960(value == "true");
                 else if (name == "MultiPV")
                     search::setMultiPV(std::stoi(value));
+                else if (name == "Contempt")
+                    search::setContempt(std::stoi(value));
                 else if (name == "Clear Hash")
                     search::clear();
                 else if (name == "Use NNUE")
