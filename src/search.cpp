@@ -341,7 +341,8 @@ namespace
 
     void clearTT()
     {
-        std::fill(tt.begin(), tt.end(), TTEntry{});
+        if (!tt.empty())
+            std::memset(static_cast<void *>(tt.data()), 0, tt.size() * sizeof(TTEntry));
         ttFilled.store(0, std::memory_order_relaxed);
     }
 
@@ -456,12 +457,18 @@ namespace
             }
 
 
-            std::sort(moves, moves + count, [](const ScoredMove &a, const ScoredMove &b)
-                      {
-                          if (a.score != b.score)
-                              return a.score > b.score;
-                          return a.order < b.order;
-                      });
+            for (int i = 1; i < count; ++i)
+            {
+                const ScoredMove key = moves[i];
+                int j = i - 1;
+                while (j >= 0 && (moves[j].score < key.score
+                                  || (moves[j].score == key.score && moves[j].order > key.order)))
+                {
+                    moves[j + 1] = moves[j];
+                    --j;
+                }
+                moves[j + 1] = key;
+            }
         }
 
         // Next move to search, or Move() when the node is exhausted.
@@ -469,10 +476,11 @@ namespace
         {
             while (index < count)
             {
-                const Move m = moves[index++].move;
+                const ScoredMove sm = moves[index++];
+                const Move m = sm.move;
                 lastSeeValid = false;
 
-                if (m == ttMove || !isTactical(pos, m))
+                if (m == ttMove || sm.score < CAPTURE_BAND)
                     return m;
 
                 lastSee = see::evaluate(pos, m);
