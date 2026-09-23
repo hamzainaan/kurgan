@@ -103,6 +103,10 @@ int see::evaluate(const Position &pos, Move m)
 
         const Square atkSq = lsb(sideAttackers & pos.byType[pt]);
         attackers &= ~(1ULL << atkSq);
+
+        if (pt == KING && (attackers & pos.byColor[static_cast<Color>(side ^ 1)]))
+            break;
+
         occ &= ~(1ULL << atkSq);
 
         // Removing the attacker may reveal an X-ray slider behind it.
@@ -128,11 +132,64 @@ int see::evaluate(const Position &pos, Move m)
 
 bool see::ge(const Position &pos, Move m, int threshold)
 {
-    return evaluate(pos, m) >= threshold;
-}
+    if (m.isCastling())
+        return 0 >= threshold;
 
-int see::sign(const Position &pos, Move m)
-{
-    const int v = evaluate(pos, m);
-    return v > 0 ? 1 : (v < 0 ? -1 : 0);
+    if (m.isEnPassant() || m.isPromotion())
+        return evaluate(pos, m) >= threshold;
+
+    const Square from = m.from();
+    const Square to = m.to();
+
+    int swap = pieceValue(typeOf(pos.board[to])) - threshold;
+    if (swap < 0)
+        return false;
+
+    swap = pieceValue(typeOf(pos.board[from])) - swap;
+    if (swap <= 0)
+        return true;
+
+    Bitboard occ = (pos.byColor[WHITE] | pos.byColor[BLACK]) ^ (1ULL << from) ^ (1ULL << to);
+    Bitboard attackers = attackersTo(pos, to, occ);
+    Color stm = pos.sideToMove;
+    int res = 1;
+
+    while (true)
+    {
+        stm = static_cast<Color>(stm ^ 1);
+        attackers &= occ;
+
+        const Bitboard stmAttackers = attackers & pos.byColor[stm];
+        if (!stmAttackers)
+            break;
+
+        res ^= 1;
+
+        int pt = PAWN;
+        for (int t = PAWN; t <= static_cast<int>(KING); ++t)
+        {
+            if (stmAttackers & pos.byType[t])
+            {
+                pt = t;
+                break;
+            }
+        }
+
+        const Square atkSq = lsb(stmAttackers & pos.byType[pt]);
+
+        if (pt == KING)
+            return (attackers & ~pos.byColor[stm]) ? res ^ 1 : res;
+
+        occ &= ~(1ULL << atkSq);
+
+        if ((swap = pieceValue(static_cast<PieceType>(pt)) - swap) < res)
+            break;
+
+        if (pt == PAWN || pt == BISHOP || pt == QUEEN)
+            attackers |= movegen::attacks(BISHOP, to, occ) & (pos.byType[BISHOP] | pos.byType[QUEEN]);
+        if (pt == ROOK || pt == QUEEN)
+            attackers |= movegen::attacks(ROOK, to, occ) & (pos.byType[ROOK] | pos.byType[QUEEN]);
+    }
+
+    return res != 0;
 }

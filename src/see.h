@@ -11,7 +11,4 @@ namespace see
 
     // True when evaluate(pos, m) >= threshold. Used for SEE-based pruning.
     bool ge(const Position &pos, Move m, int threshold);
-
-    // Sign of evaluate: +1 winning exchange, 0 neutral, -1 losing exchange.
-    int sign(const Position &pos, Move m);
 }

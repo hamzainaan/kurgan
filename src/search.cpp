@@ -486,7 +486,7 @@ namespace
                 if (m == ttMove || sm.score < CAPTURE_BAND)
                     return m;
 
-                lastSee = see::evaluate(pos, m);
+                lastSee = see::ge(pos, m, 0) ? 1 : -1;
                 lastSeeValid = true;
                 if (lastSee < 0)
                 {
@@ -858,7 +858,7 @@ namespace
                 const Move m = probcutList.moves[i];
                 const bool quiet = !m.isPromotion() && !m.isEnPassant() && !m.isCastling() &&
                                    pos.board[m.to()] == NO_PIECE;
-                if (quiet || see::evaluate(pos, m) < probcutBeta - staticEval)
+                if (quiet || !see::ge(pos, m, probcutBeta - staticEval))
                     continue;
 
                 if (!pos.do_move(m))
@@ -920,19 +920,19 @@ namespace
             // Late Move Pruning: at shallow depth the tail of the quiet move
             // list is hopeless. `legalMoves >= 1` keeps one move searched, so a
             // node is never mistaken for mate/stalemate.
-            if (!pvNode && !inCheck && quiet && legalMoves >= 1 && depth <= tuned::LMP_DEPTH &&
+            if (!pvNode && !inCheck && quiet && legalMoves >= 1 && bestScore > -MATE_THRESHOLD && depth <= tuned::LMP_DEPTH &&
                 moveCount > LMP_TABLE[improving ? 1 : 0][std::min(depth, LMP_MAX_DEPTH)])
                 continue;
 
             // Move-Level Futility Pruning: skip quiet moves that cannot raise
             // alpha even with a generous positional gain.
-            if (!pvNode && !inCheck && quiet && depth <= tuned::MOVE_FUTILITY_DEPTH &&
+            if (!pvNode && !inCheck && quiet && bestScore > -MATE_THRESHOLD && depth <= tuned::MOVE_FUTILITY_DEPTH &&
                 legalMoves >= 1 && staticEval + tuned::MOVE_FUTILITY_MARGIN * depth <= alpha)
                 continue;
 
             // SEE-Based Quiet Pruning
-            if (!pvNode && !inCheck && quiet && legalMoves >= 1 && depth <= tuned::SEE_QUIET_DEPTH &&
-                see::evaluate(pos, m) < -15 * (depth - 1) * (depth - 1))
+            if (!pvNode && !inCheck && quiet && legalMoves >= 1 && bestScore > -MATE_THRESHOLD && depth <= tuned::SEE_QUIET_DEPTH &&
+                !see::ge(pos, m, -15 * (depth - 1) * (depth - 1)))
                 continue;
 
             if (ply == 0 && (!inSearchMoves(m) || isExcludedRootMove(m)))
@@ -1100,7 +1100,7 @@ namespace
         {
             if (!inCheck)
             {
-                const int seeScore = picker.lastSeeValid ? picker.lastSee : see::evaluate(pos, m);
+                const int seeScore = picker.lastSeeValid ? picker.lastSee : (see::ge(pos, m, 0) ? 1 : -1);
                 if (seeScore < 0)
                     continue;
             }

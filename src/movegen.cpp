@@ -605,7 +605,8 @@ bool movegen::is_legal(const Position &pos, Move move)
     {
         if (move.isCastling())
             return canCastle(pos, move);
-        return !squareAttacked(pos, to, them);
+        const Bitboard occ = (pos.byColor[WHITE] | pos.byColor[BLACK]) ^ (1ULL << from);
+        return !squareAttackedWith(pos, to, them, occ);
     }
 
     Position copy = pos;
