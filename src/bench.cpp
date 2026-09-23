@@ -40,6 +40,7 @@ void bench::run(int depth)
     search::setThreads(1);
     search::setHashSize(BENCH_HASH_MB);
     search::setSilent(true);
+    search::resetStop();
 
     const auto start = std::chrono::steady_clock::now();
     uint64_t totalNodes = 0;

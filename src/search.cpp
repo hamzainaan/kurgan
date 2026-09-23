@@ -1465,7 +1465,6 @@ void search::go(const Position &root, const SearchLimits &limits)
     ponderFlag.store(limits.ponder && ponderSetting, std::memory_order_relaxed);
     ponderHitFlag.store(false, std::memory_order_relaxed);
     bestmoveEmitted.store(false, std::memory_order_relaxed);
-    stopFlag.store(false, std::memory_order_relaxed);
     searching.store(true, std::memory_order_relaxed);
     globalNodes.store(0, std::memory_order_relaxed);
     searchedNodes.store(0, std::memory_order_relaxed);
@@ -1521,6 +1520,11 @@ void search::go(const Position &root, const SearchLimits &limits)
 void search::stop()
 {
     stopFlag.store(true, std::memory_order_relaxed);
+}
+
+void search::resetStop()
+{
+    stopFlag.store(false, std::memory_order_relaxed);
 }
 
 bool search::isRunning()

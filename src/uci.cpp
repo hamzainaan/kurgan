@@ -341,6 +341,7 @@ void uci::loop()
         {
             joinSearch();
             const search::SearchLimits limits = parseGo(ss, pos);
+            search::resetStop();
             searchActive = true;
             searchThread = std::thread([pos, limits]()
                                        { search::go(pos, limits); });

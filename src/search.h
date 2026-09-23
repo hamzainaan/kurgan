@@ -37,6 +37,7 @@ namespace search
 
     // Request the search to stop at the next opportunity.
     void stop();
+    void resetStop();
 
     // The opponent played the pondered move: continue with real time.
     void ponderhit();
