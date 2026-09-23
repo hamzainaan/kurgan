@@ -1629,24 +1629,6 @@ void search::ponderhit()
     computeDeadline(activeLimits, activeUs);
 }
 
-std::string search::tuningOptionsUci()
-{
-    std::string out;
-    for (const TuningParam &p : tuningParams)
-    {
-        out += "option name ";
-        out += p.name;
-        out += " type spin default ";
-        out += std::to_string(*p.value);
-        out += " min ";
-        out += std::to_string(p.minValue);
-        out += " max ";
-        out += std::to_string(p.maxValue);
-        out += '\n';
-    }
-    return out;
-}
-
 bool search::setTuningOption(const std::string &name, int value)
 {
     for (const TuningParam &p : tuningParams)

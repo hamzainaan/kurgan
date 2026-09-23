@@ -73,6 +73,5 @@ namespace search
 
     // Suppress all search output (used by the benchmark).
     void setSilent(bool enabled);
-    std::string tuningOptionsUci();
     bool setTuningOption(const std::string &name, int value);
 }

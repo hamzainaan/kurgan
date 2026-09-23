@@ -242,19 +242,18 @@ void uci::loop()
         {
             std::cout << "id name Kurgan " << KURGAN_VERSION << std::endl;
             std::cout << "id author Hamza Inan" << std::endl;
-            std::cout << "option name Hash type spin default 16 min " << search::HASH_MIN
-                      << " max " << search::HASH_MAX << std::endl;
             std::cout << "option name Threads type spin default 1 min " << search::THREADS_MIN
                       << " max " << search::maxThreadCount() << std::endl;
-            std::cout << "option name Ponder type check default false" << std::endl;
-            std::cout << "option name UCI_Chess960 type check default false" << std::endl;
+            std::cout << "option name Hash type spin default 16 min " << search::HASH_MIN
+                      << " max " << search::HASH_MAX << std::endl;
+            std::cout << "option name Clear Hash type button" << std::endl;
             std::cout << "option name MultiPV type spin default 1 min " << search::MULTIPV_MIN
                       << " max " << search::MULTIPV_MAX << std::endl;
+            std::cout << "option name Ponder type check default false" << std::endl;
             std::cout << "option name Contempt type spin default 0 min " << search::CONTEMPT_MIN
                       << " max " << search::CONTEMPT_MAX << std::endl;
-            std::cout << "option name Clear Hash type button" << std::endl;
+            std::cout << "option name UCI_Chess960 type check default false" << std::endl;
             std::cout << "option name Use NNUE type check default true" << std::endl;
-            std::cout << search::tuningOptionsUci();
             if (nnue::loaded())
                 std::cout << "info string evaluation nnue (" << nnue::file() << ") id " << std::hex
                           << nnue::hash() << std::dec << std::endl;
