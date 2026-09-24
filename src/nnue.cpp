@@ -117,11 +117,12 @@ namespace
         return king == SQ_NONE ? SQ_A1 : perspectiveSquare(colour, king);
     }
 
-    // Vertical king buckets: the rank pair and the mirrored file pair.
+    // Thirty-two king buckets: eight ranks by four horizontally mirrored file
+    // groups, the bucketing Stockfish's HalfKA_hm uses.
     int kingBucket(Square sq)
     {
         const int file = sq & 7;
-        return ((sq >> 3) & 6) | ((file > 3 ? 7 - file : file) >> 1);
+        return ((sq >> 3) << 2) | (file > 3 ? 7 - file : file);
     }
 
     int featureIndex(int colour, Square king, int pieceColour, int type, int square)

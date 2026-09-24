@@ -8,15 +8,16 @@
 
 class Position;
 
-// KNet v2: the architecture Bullet emits. Eight vertical king buckets, each
-// perspective mirroring the king file, 256 hidden units, an output bucket per
-// four pieces on the board and squared clipped ReLU.
+// KNet v3: the architecture Bullet emits. Thirty-two king buckets (rank x
+// mirrored file group, i.e. Stockfish's HalfKA_hm bucketing), each perspective
+// mirroring the king file, 512 hidden units, an output bucket per four pieces on
+// the board and squared clipped ReLU.
 namespace nnue
 {
-    constexpr int KING_BUCKETS = 8;
+    constexpr int KING_BUCKETS = 32;
     constexpr int FEATURES_PER_BUCKET = 768;
-    constexpr int INPUT_SIZE = KING_BUCKETS * FEATURES_PER_BUCKET; // 6144
-    constexpr int HALF_DIM = 256;
+    constexpr int INPUT_SIZE = KING_BUCKETS * FEATURES_PER_BUCKET; // 24576
+    constexpr int HALF_DIM = 512;
     constexpr int OUTPUT_BUCKETS = 8;
 
     constexpr int PIECE_STRIDE = 64;
