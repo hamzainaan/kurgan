@@ -68,12 +68,16 @@ namespace
     constexpr int BOUND_LOWER = 2;
     constexpr int BOUND_UPPER = 3;
 
+    // Sentinel for "this entry carries no static eval".
+    constexpr int NO_EVAL = 32767;
+
     struct TTEntry
     {
         uint64_t key = 0;
         Move move;
         int16_t score = 0;
-        int16_t depth = 0;
+        int16_t eval = NO_EVAL;
+        int8_t depth = 0;
         int8_t bound = 0;
     };
 
@@ -231,7 +235,7 @@ namespace
         return s >= MATE_THRESHOLD ? s + ply : (s <= -MATE_THRESHOLD ? s - ply : s);
     }
 
-    void ttStore(uint64_t key, Move move, int score, int depth, int bound, int ply)
+    void ttStore(uint64_t key, Move move, int score, int depth, int bound, int ply, int eval = NO_EVAL)
     {
         TTEntry &e = tt[key & ttMask];
 
@@ -256,8 +260,9 @@ namespace
         e.key = key;
         e.move = move;
         e.score = static_cast<int16_t>(scoreToTT(score, ply));
-        e.depth = static_cast<int16_t>(depth);
+        e.depth = static_cast<int8_t>(depth);
         e.bound = static_cast<int8_t>(bound);
+        e.eval = static_cast<int16_t>(eval);
     }
 
     // Dynamic time management
@@ -769,7 +774,13 @@ namespace
         // Static evaluation drives the pruning decisions below. It is resolved
         // for every node (not only non-PV ones) because `improving` compares it
         // against the value two plies up the current line.
-        const int staticEval = inCheck ? -MATE + ply : evaluate::evaluate(pos);
+        int staticEval;
+        if (inCheck)
+            staticEval = -MATE + ply;
+        else if (tte.key == key && tte.eval != NO_EVAL)
+            staticEval = tte.eval;
+        else
+            staticEval = evaluate::evaluate(pos);
         staticEvalStack[ply] = staticEval;
         const bool improving = !inCheck && ply >= 2 && staticEval >= staticEvalStack[ply - 2];
         const bool mateWindow = beta >= MATE_THRESHOLD || beta <= -MATE_THRESHOLD;
@@ -1043,7 +1054,8 @@ namespace
             else
                 bound = BOUND_EXACT;
 
-            ttStore(key, bestMove, bestScore, depth, bound, ply);
+            // The in-check value is a mate-distance score, not an eval.
+            ttStore(key, bestMove, bestScore, depth, bound, ply, inCheck ? NO_EVAL : staticEval);
         }
 
         return bestScore;
@@ -1077,7 +1089,10 @@ namespace
         if (pos.halfmoveClock >= 100 || pos.isRepetition(ply) || isInsufficientMaterial(pos))
             return drawScore(pos);
 
-        const int standPat = evaluate::evaluate(pos);
+        const TTEntry &qtte = ttEntry(pos.zobristKey);
+        const int standPat = (qtte.key == pos.zobristKey && qtte.eval != NO_EVAL)
+                                 ? qtte.eval
+                                 : evaluate::evaluate(pos);
         if (!inCheck)
         {
             if (standPat >= beta)
@@ -1246,7 +1261,6 @@ namespace
         std::memset(killers, 0, sizeof(killers));
         std::memset(history, 0, sizeof(history));
         std::memset(captureHistory, 0, sizeof(captureHistory));
-        std::memset(counterMoves, 0, sizeof(counterMoves));
         std::fill(moveStack, moveStack + MAX_PLY + 2, Move());
         std::memset(pvTable, 0, sizeof(pvTable));
         std::memset(pvLength, 0, sizeof(pvLength));
@@ -1418,6 +1432,7 @@ void search::init()
 void search::clear()
 {
     clearTT();
+    std::memset(counterMoves, 0, sizeof(counterMoves));
 }
 
 void search::go(const Position &root, const SearchLimits &limits)
