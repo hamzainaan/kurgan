@@ -256,5 +256,6 @@ inline int PROBCUT_DEPTH = 9;
 inline int PROBCUT_MARGIN = 80;
 inline int IID_DEPTH = 5;
 inline int LMP_DEPTH = 10;
+inline int MOVE_BUDGET = 800000;
 
 } // namespace tuned

@@ -60,6 +60,7 @@ namespace
         {"ProbCut Margin", &tuned::PROBCUT_MARGIN, 0, 300},
         {"IID Depth", &tuned::IID_DEPTH, 2, 12},
         {"LMP Depth", &tuned::LMP_DEPTH, 0, 10},
+        {"Move Budget", &tuned::MOVE_BUDGET, 0, 5000000},
     };
 
     // Transposition table bounds.
@@ -96,6 +97,10 @@ namespace
     alignas(64) std::atomic<bool> ponderFlag{false};
     alignas(64) std::atomic<bool> ponderHitFlag{false};
     alignas(64) std::atomic<bool> bestmoveEmitted{false};
+
+    // Throughput of the previous search, used to express the time allocation in nodes.
+    std::atomic<int64_t> lastNps{0};
+    constexpr int64_t FALLBACK_NPS = 1500000;
 
     std::chrono::steady_clock::time_point deadline;     // hard limit: always stop here
     std::chrono::steady_clock::time_point softDeadline; // optimum: stop early when stable
@@ -281,6 +286,19 @@ namespace
             const int64_t myInc = us == WHITE ? limits.winc : limits.binc;
 
             int64_t optimum = myTime / 40 + myInc / 2;
+
+            // The search's tactical accuracy stops improving
+            // meaningfully past a certain number of nodes, so there is no point
+            // buying more of them.
+            if (tuned::MOVE_BUDGET > 0)
+            {
+                const int64_t nps = lastNps.load(std::memory_order_relaxed);
+                const int64_t budgetMs = std::max<int64_t>(
+                    1, static_cast<int64_t>(tuned::MOVE_BUDGET) * 1000 /
+                           (nps > 0 ? nps : FALLBACK_NPS));
+                optimum = std::min(optimum, budgetMs);
+            }
+
             int64_t maximum = optimum * 2;
             if (maximum > myTime / 8)
                 maximum = myTime / 8;
@@ -1527,6 +1545,15 @@ void search::go(const Position &root, const SearchLimits &limits)
         std::lock_guard<std::mutex> lock(outputMutex);
         std::cout << "bestmove " << (finalBestMove == Move() ? "0000" : moveToUci(finalBestMove)) << std::endl;
     }
+
+    // Remember the throughput so the next move's time allocation can be
+    // expressed as a node budget.
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - searchStart)
+                               .count();
+    const uint64_t searched = searchedNodes.load(std::memory_order_relaxed);
+    if (elapsedMs > 0 && searched > 0)
+        lastNps.store(static_cast<int64_t>(searched) * 1000 / elapsedMs, std::memory_order_relaxed);
 
     stopFlag.store(false, std::memory_order_relaxed);
     searching.store(false, std::memory_order_relaxed);
