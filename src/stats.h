@@ -62,6 +62,7 @@ namespace stats
         // NNUE
         uint64_t evalCalls = 0;
         uint64_t evalRebuilds = 0; // half accumulators rebuilt from scratch
+        uint64_t evalRefills = 0;  // half accumulators refilled from the king-square cache
         uint64_t evalUpdates = 0;  // feature rows applied incrementally
     };
 

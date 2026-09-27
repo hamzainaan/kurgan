@@ -284,6 +284,21 @@ namespace
 
     thread_local Tracker g_tracker;
 
+    // A king move makes the whole half stale but the piece list is nearly always close to the last
+    // state seen on that king square, so a refill diffs the cached list instead of re-adding every
+    // piece and only a different network invalidates an entry.
+    struct HalfCache
+    {
+        bool valid = false;
+        uint32_t generation = 0;
+        uint8_t count = 0;
+        Piece pieces[32] = {};
+        Square squares[32] = {};
+        int16_t values[nnue::HALF_DIM];
+    };
+
+    thread_local HalfCache g_halfCache[COLOR_NB][64];
+
     void rebuildHalf(const Position &pos, const Network &net, int colour)
     {
         ++stats::current().evalRebuilds;
@@ -310,6 +325,69 @@ namespace
         }
     }
 
+    void writeCacheList(HalfCache &cache, const Position &pos)
+    {
+        cache.valid = true;
+        cache.generation = g_generation;
+        cache.count = 0;
+        for (int pt = PAWN; pt <= KING; ++pt)
+        {
+            for (int pieceColour = WHITE; pieceColour <= BLACK; ++pieceColour)
+            {
+                Bitboard b = pos.byColor[pieceColour] & pos.byType[pt];
+                while (b)
+                {
+                    const int sq = bitScan(b);
+                    b &= b - 1;
+                    cache.pieces[cache.count] = makePiece(static_cast<Color>(pieceColour),
+                                                          static_cast<PieceType>(pt));
+                    cache.squares[cache.count] = static_cast<Square>(sq);
+                    ++cache.count;
+                }
+            }
+        }
+    }
+
+    void refreshHalf(const Position &pos, const Network &net, int colour)
+    {
+        const Square king = perspectiveKing(pos, colour);
+        HalfCache &cache = g_halfCache[colour][king];
+        int16_t *acc = g_tracker.values[colour];
+
+        if (!cache.valid || cache.generation != g_generation)
+        {
+            rebuildHalf(pos, net, colour);
+            writeCacheList(cache, pos);
+            std::memcpy(cache.values, acc, sizeof(cache.values));
+            return;
+        }
+
+        ++stats::current().evalRefills;
+
+        Bitboard covered = 0;
+        for (int i = 0; i < cache.count; ++i)
+        {
+            const Square sq = cache.squares[i];
+            const Piece pc = cache.pieces[i];
+            if (pos.board[sq] == pc)
+                covered |= 1ULL << static_cast<int>(sq);
+            else
+                addRow(cache.values, net, featureIndex(colour, king, colorOf(pc), typeOf(pc), sq), false);
+        }
+
+        Bitboard added = (pos.byColor[WHITE] | pos.byColor[BLACK]) & ~covered;
+        while (added)
+        {
+            const int sq = bitScan(added);
+            added &= added - 1;
+            const Piece pc = pos.board[sq];
+            addRow(cache.values, net, featureIndex(colour, king, colorOf(pc), typeOf(pc), sq), true);
+        }
+
+        std::memcpy(acc, cache.values, sizeof(cache.values));
+        writeCacheList(cache, pos);
+    }
+
     // Accumulator matching 'pos', refreshed or rebuilt as far as it is out of date.
     void tracked(const Position &pos, const Network &net)
     {
@@ -322,7 +400,7 @@ namespace
             t.dirty = 0;
             t.valid = true;
             for (int c = 0; c < COLOR_NB; ++c)
-                rebuildHalf(pos, net, c);
+                refreshHalf(pos, net, c);
             return;
         }
 
@@ -332,7 +410,7 @@ namespace
             if ((t.dirty & bit) == 0)
                 continue;
             t.dirty &= static_cast<uint8_t>(~bit);
-            rebuildHalf(pos, net, c);
+            refreshHalf(pos, net, c);
         }
     }
 
@@ -443,7 +521,7 @@ void nnue::track(const Position &pos)
         return;
 
     for (int c = 0; c < COLOR_NB; ++c)
-        rebuildHalf(pos, *g_net, c);
+        refreshHalf(pos, *g_net, c);
 }
 
 void nnue::update(const Position &pos, Piece piece, Square square, bool add)

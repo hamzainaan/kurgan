@@ -110,6 +110,7 @@ std::string stats::report()
         t.standPatCutoffs += s.standPatCutoffs;
         t.evalCalls += s.evalCalls;
         t.evalRebuilds += s.evalRebuilds;
+        t.evalRefills += s.evalRefills;
         t.evalUpdates += s.evalUpdates;
     }
 
@@ -170,6 +171,7 @@ std::string stats::report()
     out.unsetf(std::ios::fixed);
     out << "NNUE       eval calls " << t.evalCalls
         << "  rebuilds " << t.evalRebuilds
+        << "  cached refills " << t.evalRefills
         << "  incremental updates " << t.evalUpdates << "\n";
 
     struct WorkerSummary
