@@ -159,19 +159,6 @@ constexpr Rank rankOf(Square s)
     return static_cast<Rank>(static_cast<int>(s) >> 3);
 }
 
-// Compass directions as bitboard shifts.
-enum Direction : int
-{
-    NORTH = 8,
-    EAST = 1,
-    SOUTH = -8,
-    WEST = -1,
-    NORTH_EAST = 9,
-    NORTH_WEST = 7,
-    SOUTH_EAST = -7,
-    SOUTH_WEST = -9
-};
-
 // Material values in centipawns, indexed by PieceType.
 constexpr int pieceValue(PieceType pt)
 {

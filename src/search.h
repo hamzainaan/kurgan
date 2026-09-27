@@ -45,8 +45,6 @@ namespace search
     // The opponent played the pondered move: continue with real time.
     void ponderhit();
 
-    bool isRunning();
-
     Move bestMove();
     uint64_t totalNodes();
 
@@ -71,9 +69,6 @@ namespace search
     int threadCount();
     int maxThreadCount();
     int threadSetting();
-    int multiPV();
-    int contempt();
-    bool ponderEnabled();
 
     // Suppress all search output (used by the benchmark).
     void setSilent(bool enabled);

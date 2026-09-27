@@ -52,10 +52,8 @@ namespace
     // Board geometry masks.
     constexpr Bitboard RANK_1_BB = 0x00000000000000FFULL;
     constexpr Bitboard RANK_2_BB = RANK_1_BB << 8;
-    constexpr Bitboard RANK_3_BB = RANK_1_BB << 16;
     constexpr Bitboard RANK_4_BB = RANK_1_BB << 24;
     constexpr Bitboard RANK_5_BB = RANK_1_BB << 32;
-    constexpr Bitboard RANK_6_BB = RANK_1_BB << 40;
     constexpr Bitboard RANK_7_BB = RANK_1_BB << 48;
     constexpr Bitboard RANK_8_BB = RANK_1_BB << 56;
 
@@ -65,7 +63,6 @@ namespace
     constexpr Bitboard FILE_D_BB = FILE_A_BB << 3;
     constexpr Bitboard FILE_E_BB = FILE_A_BB << 4;
     constexpr Bitboard FILE_F_BB = FILE_A_BB << 5;
-    constexpr Bitboard FILE_G_BB = FILE_A_BB << 6;
     constexpr Bitboard FILE_H_BB = FILE_A_BB << 7;
 
     // Pre-computed leaper and pawn attack tables.

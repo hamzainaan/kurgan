@@ -79,7 +79,6 @@ namespace
     alignas(64) std::atomic<bool> stopFlag{false};
     alignas(64) std::atomic<uint64_t> searchedNodes{0};
     alignas(64) std::atomic<uint64_t> globalNodes{0};
-    alignas(64) std::atomic<bool> searching{false};
     alignas(64) std::atomic<bool> ponderFlag{false};
     alignas(64) std::atomic<bool> ponderHitFlag{false};
 
@@ -526,27 +525,6 @@ namespace
         std::cout << std::endl;
     }
 
-    // Emit up to 'depth' root moves in a single line (worker 0 only).
-    // Called once per depth instead of printing a currmove line per move
-    // during the search, which costs nps.
-    /*
-    void printRootMoves(const Position &pos, int depth)
-    {
-        MoveList list;
-        movegen::generate_pseudo_legal_moves(pos, list);
-
-        MovePicker picker;
-        picker.init(pos, list, Move(), Move(), 0, false);
-
-        const int limit = std::min(picker.count, depth);
-
-        std::lock_guard<std::mutex> lock(outputMutex);
-        std::cout << "info depth " << depth;
-        for (int i = 0; i < limit; ++i)
-            std::cout << " currmove " << moveToUci(picker.moves[i].move);
-        std::cout << std::endl;
-    }
-    */
     int quiescence(Position &pos, int alpha, int beta, int ply);
 
     // Integer floor(log2(n)) for n >= 1.
@@ -1567,7 +1545,6 @@ void search::go(const Position &root, const SearchLimits &limits)
         tt::resize(static_cast<size_t>(hashSizeMb));
     }
 
-    searching.store(true, std::memory_order_relaxed);
     globalNodes.store(0, std::memory_order_relaxed);
     searchedNodes.store(0, std::memory_order_relaxed);
     completedDepth = 0;
@@ -1628,17 +1605,11 @@ void search::go(const Position &root, const SearchLimits &limits)
     }
 
     stopFlag.store(false, std::memory_order_relaxed);
-    searching.store(false, std::memory_order_relaxed);
 }
 
 void search::stop()
 {
     stopFlag.store(true, std::memory_order_relaxed);
-}
-
-bool search::isRunning()
-{
-    return searching.load(std::memory_order_relaxed);
 }
 
 Move search::bestMove()
@@ -1724,24 +1695,9 @@ void search::setContempt(int value)
     }
 }
 
-int search::contempt()
-{
-    return contemptSetting;
-}
-
 void search::setPonder(bool enabled)
 {
     ponderSetting = enabled;
-}
-
-int search::multiPV()
-{
-    return multiPVSetting;
-}
-
-bool search::ponderEnabled()
-{
-    return ponderSetting;
 }
 
 void search::ponderhit()
