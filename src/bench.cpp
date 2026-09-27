@@ -3,6 +3,7 @@
 #include "movegen.h"
 #include "position.h"
 #include "search.h"
+#include "stats.h"
 
 #include <chrono>
 #include <cstdint>
@@ -41,6 +42,7 @@ void bench::run(int depth)
     search::setHashSize(BENCH_HASH_MB);
     search::setSilent(true);
     search::resetStop();
+    stats::clearRecords();
 
     const auto start = std::chrono::steady_clock::now();
     uint64_t totalNodes = 0;
@@ -77,4 +79,6 @@ void bench::run(int depth)
     std::cout << "Nodes searched: " << totalNodes << std::endl;
     std::cout << "Time: " << ms << " ms" << std::endl;
     std::cout << "NPS: " << (ms > 0 ? totalNodes * 1000 / static_cast<uint64_t>(ms) : 0) << std::endl;
+
+    stats::print();
 }

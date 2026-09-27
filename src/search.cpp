@@ -2,6 +2,8 @@
 
 #include "evaluate.h"
 #include "see.h"
+#include "stats.h"
+#include "tt.h"
 #include "tuned_params.h"
 
 #include <algorithm>
@@ -20,8 +22,6 @@
 namespace
 {
     constexpr int INF = 32000;
-    constexpr int MATE = 32000;
-    constexpr int MATE_THRESHOLD = MATE - 128;
     constexpr int MAX_PLY = 128;
     constexpr int MAX_DEPTH = 64;
     constexpr int LMP_MAX_DEPTH = 10;
@@ -64,26 +64,13 @@ namespace
     };
 
     // Transposition table bounds.
-    constexpr int BOUND_NONE = 0;
-    constexpr int BOUND_EXACT = 1;
-    constexpr int BOUND_LOWER = 2;
-    constexpr int BOUND_UPPER = 3;
-
-    // Sentinel for "this entry carries no static eval".
-    constexpr int NO_EVAL = 32767;
-
-    struct TTEntry
-    {
-        uint64_t key = 0;
-        Move move;
-        int16_t score = 0;
-        int16_t eval = NO_EVAL;
-        int8_t depth = 0;
-        int8_t bound = 0;
-    };
-
-    std::vector<TTEntry> tt;
-    uint64_t ttMask = 0;
+    constexpr int MATE = tt::MATE;
+    constexpr int MATE_THRESHOLD = tt::MATE_THRESHOLD;
+    constexpr int BOUND_NONE = tt::BOUND_NONE;
+    constexpr int BOUND_EXACT = tt::BOUND_EXACT;
+    constexpr int BOUND_LOWER = tt::BOUND_LOWER;
+    constexpr int BOUND_UPPER = tt::BOUND_UPPER;
+    constexpr int NO_EVAL = tt::NO_EVAL;
 
     // Frequently accessed atomics are isolated on separate cache lines to
     // avoid false sharing: without this, a thread writing to a counter would
@@ -91,7 +78,6 @@ namespace
     // per-thread throughput (and reported nps) would drop as threads grow.
     alignas(64) std::atomic<bool> stopFlag{false};
     alignas(64) std::atomic<uint64_t> searchedNodes{0};
-    alignas(64) std::atomic<uint64_t> ttFilled{0};
     alignas(64) std::atomic<uint64_t> globalNodes{0};
     alignas(64) std::atomic<bool> searching{false};
     alignas(64) std::atomic<bool> ponderFlag{false};
@@ -133,12 +119,31 @@ namespace
     thread_local int history[COLOR_NB][SQUARE_NB][SQUARE_NB];
     thread_local int captureHistory[PIECE_NB][SQUARE_NB][PIECE_TYPE_NB];
     thread_local Move counterMoves[COLOR_NB][SQUARE_NB][SQUARE_NB];
+
+    // Continuation history
+    constexpr int CONT_PLIES = 4;
+    constexpr int CONT_DISTANCE[CONT_PLIES] = {1, 2, 4, 6};
+    constexpr int CONT_WEIGHT[CONT_PLIES] = {2, 2, 1, 1};
+    constexpr int CONT_WEIGHT_SUM = 6;
+    constexpr int PIECE_TO_NB = static_cast<int>(PIECE_NB) * static_cast<int>(SQUARE_NB);
+    constexpr int PAWN_HISTORY_NB = 4096;
+    constexpr int CONT_SCALE = 100; // percent of the continuation term
+    constexpr int PAWN_SCALE = 100; // percent of the pawn-history term
+    constexpr size_t CONT_ENTRIES = static_cast<size_t>(CONT_PLIES) * PIECE_TO_NB * PIECE_TO_NB;
+    constexpr size_t PAWN_ENTRIES = static_cast<size_t>(PAWN_HISTORY_NB) * PIECE_TO_NB;
+    std::mutex historyMutex;
+    std::vector<std::vector<int16_t>> contSlices; // one slice per worker slot
+    std::vector<std::vector<int16_t>> pawnSlices;
+    thread_local int16_t *contHistory = nullptr; // this worker's slice
+    thread_local int16_t *pawnHistory = nullptr;
+    thread_local int16_t *contRows[CONT_PLIES][MAX_PLY + 2];
+    thread_local Piece movedPieceStack[MAX_PLY + 2];
+
     thread_local Move moveStack[MAX_PLY + 2];
     thread_local int staticEvalStack[MAX_PLY + 2];
     thread_local bool inIID = false;
     thread_local Move pvTable[MAX_PLY][MAX_PLY];
     thread_local int pvLength[MAX_PLY];
-    thread_local uint64_t ttFilledLocal = 0;
 
     int countrZero(Bitboard b)
     {
@@ -228,46 +233,6 @@ namespace
     int drawScore(const Position &pos)
     {
         return pos.sideToMove == activeUs ? -contemptSetting : contemptSetting;
-    }
-
-    int scoreFromTT(int s, int ply)
-    {
-        return s >= MATE_THRESHOLD ? s - ply : (s <= -MATE_THRESHOLD ? s + ply : s);
-    }
-
-    int scoreToTT(int s, int ply)
-    {
-        return s >= MATE_THRESHOLD ? s + ply : (s <= -MATE_THRESHOLD ? s - ply : s);
-    }
-
-    void ttStore(uint64_t key, Move move, int score, int depth, int bound, int ply, int eval = NO_EVAL)
-    {
-        TTEntry &e = tt[key & ttMask];
-
-        if (e.key != 0 && e.bound == BOUND_EXACT)
-        {
-            const int stored = scoreFromTT(e.score, ply);
-            const bool storedMate = stored >= MATE_THRESHOLD || stored <= -MATE_THRESHOLD;
-            if (storedMate && (e.key != key || bound != BOUND_EXACT))
-                return;
-        }
-        if (e.key == 0)
-        {
-            // Count newly filled entries locally and flush to the shared
-            // counter only periodically: a per-store atomic RMW would
-            // serialize all threads on one cache line and tank nps.
-            if (++ttFilledLocal == 1024)
-            {
-                ttFilled.fetch_add(1024, std::memory_order_relaxed);
-                ttFilledLocal = 0;
-            }
-        }
-        e.key = key;
-        e.move = move;
-        e.score = static_cast<int16_t>(scoreToTT(score, ply));
-        e.depth = static_cast<int8_t>(depth);
-        e.bound = static_cast<int8_t>(bound);
-        e.eval = static_cast<int16_t>(eval);
     }
 
     // Dynamic time management
@@ -365,30 +330,6 @@ namespace
         stopFlag.store(true, std::memory_order_relaxed);
     }
 
-    void clearTT()
-    {
-        if (!tt.empty())
-            std::memset(static_cast<void *>(tt.data()), 0, tt.size() * sizeof(TTEntry));
-        ttFilled.store(0, std::memory_order_relaxed);
-    }
-
-    void ttResize(size_t megabytes)
-    {
-        size_t bytes = megabytes * 1024 * 1024;
-        size_t entries = bytes / sizeof(TTEntry);
-        size_t e = 1;
-        while ((e << 1) <= entries)
-            e <<= 1;
-        tt.resize(e);
-        ttMask = e - 1;
-        clearTT();
-    }
-
-    TTEntry &ttEntry(uint64_t key)
-    {
-        return tt[key & ttMask];
-    }
-
     bool isTactical(const Position &pos, Move m)
     {
         // Castling is a quiet move whose "to" square holds our own rook.
@@ -423,6 +364,86 @@ namespace
         h += bonus - h * magnitude / HISTORY_MAX;
     }
 
+    void updateHistory(int16_t &h, int bonus)
+    {
+        int value = h;
+        updateHistory(value, bonus);
+        h = static_cast<int16_t>(value);
+    }
+
+    // Index of a (piece, target) pair inside one history row.
+    constexpr int pieceToIndex(Piece piece, Square to)
+    {
+        return static_cast<int>(piece) * static_cast<int>(SQUARE_NB) + static_cast<int>(to);
+    }
+
+    // Attach this worker to its history slice, allocating it on first use.
+    void acquireHistorySlices()
+    {
+        if (contHistory != nullptr)
+            return;
+
+        std::lock_guard<std::mutex> lock(historyMutex);
+        const size_t slot = static_cast<size_t>(workerId);
+        if (contSlices.size() <= slot)
+        {
+            contSlices.resize(slot + 1);
+            pawnSlices.resize(slot + 1);
+        }
+        if (contSlices[slot].empty())
+        {
+            contSlices[slot].assign(CONT_ENTRIES, 0);
+            pawnSlices[slot].assign(PAWN_ENTRIES, 0);
+        }
+
+        contHistory = contSlices[slot].data();
+        pawnHistory = pawnSlices[slot].data();
+    }
+
+    void clearHistorySlices()
+    {
+        std::lock_guard<std::mutex> lock(historyMutex);
+        for (std::vector<int16_t> &slice : contSlices)
+            std::fill(slice.begin(), slice.end(), 0);
+        for (std::vector<int16_t> &slice : pawnSlices)
+            std::fill(slice.begin(), slice.end(), 0);
+    }
+
+    int16_t &pawnHistoryEntry(const Position &pos, Piece piece, Square to)
+    {
+        const size_t row = static_cast<uint32_t>(pos.pawnKey) & (PAWN_HISTORY_NB - 1);
+        return pawnHistory[row * PIECE_TO_NB + pieceToIndex(piece, to)];
+    }
+
+    void setContinuationRows(const Position &pos, int ply)
+    {
+        for (int i = 0; i < CONT_PLIES; ++i)
+        {
+            const int back = ply - CONT_DISTANCE[i];
+            const Piece piece = back < 0 ? NO_PIECE : movedPieceStack[back];
+            contRows[i][ply] = piece == NO_PIECE
+                                   ? nullptr
+                                   : &contHistory[(static_cast<size_t>(i) * PIECE_TO_NB +
+                                                   pieceToIndex(piece, moveTarget(moveStack[back]))) *
+                                                  PIECE_TO_NB];
+        }
+
+        movedPieceStack[ply] = moveStack[ply] == Move() ? NO_PIECE : pos.board[moveTarget(moveStack[ply])];
+    }
+
+    int quietHistoryScore(const Position &pos, Move m, int ply)
+    {
+        const Piece piece = pos.board[m.from()];
+        const Square to = moveTarget(m);
+        int cont = 0;
+        for (int i = 0; i < CONT_PLIES; ++i)
+            if (contRows[i][ply] != nullptr)
+                cont += CONT_WEIGHT[i] * contRows[i][ply][pieceToIndex(piece, to)];
+
+        return history[pos.sideToMove][m.from()][to] + CONT_SCALE * (cont / CONT_WEIGHT_SUM) / 100 +
+               PAWN_SCALE * pawnHistoryEntry(pos, piece, to) / 100;
+    }
+
     struct ScoredMove
     {
         int score;
@@ -451,7 +472,6 @@ namespace
         void init(const Position &pos, const MoveList &list, Move ttBest, Move counterMove,
                   int ply, bool capturesOnly)
         {
-            const Color us = pos.sideToMove;
             ttMove = ttBest;
             count = 0;
             index = 0;
@@ -477,7 +497,7 @@ namespace
                 else if (m == counterMove)
                     score = COUNTERMOVE_SCORE;
                 else
-                    score = history[us][m.from()][moveTarget(m)];
+                    score = quietHistoryScore(pos, m, ply);
 
                 moves[count++] = {score, m, static_cast<uint16_t>(count)};
             }
@@ -570,9 +590,7 @@ namespace
         std::cout << " nodes " << nodeCount;
         if (elapsedMs > 0)
             std::cout << " nps " << (nodeCount * 1000 / elapsedMs);
-        const uint64_t filled = ttFilled.load(std::memory_order_relaxed);
-        const int permille = tt.empty() ? 0 : static_cast<int>(std::min<uint64_t>(1000, filled * 1000 / tt.size()));
-        std::cout << " hashfull " << permille;
+        std::cout << " hashfull " << tt::hashfull();
         std::cout << " time " << elapsedMs;
 
         std::cout << " pv";
@@ -644,11 +662,11 @@ namespace
         int n = 0;
         while (n < need)
         {
-            const TTEntry &e = ttEntry(pos.zobristKey);
-            if (e.key != pos.zobristKey || e.move == Move() || !pos.do_move(e.move))
+            const tt::Entry *e = tt::probe(pos.zobristKey);
+            if (e == nullptr || e->move == Move() || !pos.do_move(e->move))
                 break;
 
-            pvTable[ply][ply + n] = e.move;
+            pvTable[ply][ply + n] = e->move;
             ++n;
         }
 
@@ -753,32 +771,37 @@ namespace
         if (ply > 0 && (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos)))
         {
             const int draw = drawScore(pos);
-            ttStore(key, Move(), draw, depth, BOUND_EXACT, ply);
+            tt::store(key, Move(), draw, depth, BOUND_EXACT, ply);
             return draw;
         }
         if (ply > 0 && pos.isRepetition(ply))
             return drawScore(pos);
 
         // Transposition table probe.
-        TTEntry &tte = ttEntry(key);
+        const tt::Entry *tte = tt::probe(key);
         Move ttMove;
-        if (tte.key == key)
+        if (tte != nullptr)
         {
-            ttMove = tte.move;
-            const int s = scoreFromTT(tte.score, ply);
-
+            ttMove = tte->move;
+            const int s = tt::scoreFromTT(tte->score, ply);
 
             const bool mate = s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD;
-            if (tte.bound == BOUND_EXACT && ply > 0 && mate
+            if (tte->bound() == BOUND_EXACT && ply > 0 && mate
                 && (!pvNode || hasMateProof(pos, ply, s)))
-                return s;
-
-            if (tte.depth >= depth && !pvNode)
             {
-                if (tte.bound == BOUND_EXACT
-                    || (tte.bound == BOUND_LOWER && s >= beta)
-                    || (tte.bound == BOUND_UPPER && s <= alpha))
+                ++stats::current().ttCutoffs;
+                return s;
+            }
+
+            if (tte->depth >= depth && !pvNode)
+            {
+                if (tte->bound() == BOUND_EXACT
+                    || (tte->bound() == BOUND_LOWER && s >= beta)
+                    || (tte->bound() == BOUND_UPPER && s <= alpha))
+                {
+                    ++stats::current().ttCutoffs;
                     return s;
+                }
             }
         }
 
@@ -795,8 +818,8 @@ namespace
         int staticEval;
         if (inCheck)
             staticEval = -MATE + ply;
-        else if (tte.key == key && tte.eval != NO_EVAL)
-            staticEval = tte.eval;
+        else if (tte != nullptr && tte->eval != NO_EVAL)
+            staticEval = tte->eval;
         else
             staticEval = evaluate::evaluate(pos);
         staticEvalStack[ply] = staticEval;
@@ -815,14 +838,20 @@ namespace
             {
                 const int razorScore = quiescence(pos, alpha, beta, ply);
                 if (razorScore < beta)
+                {
+                    ++stats::current().razorCutoffs;
                     return razorScore;
+                }
             }
 
             // Reverse Futility Pruning (parent-node futility): at pre-frontier nodes a quiet position whose eval is
             // so far above beta that even a quiescence search cannot reach it returns immediately.
             if (!inCheck && !mateWindow && hasNonPawn && depth <= tuned::RFP_DEPTH &&
                 staticEval - tuned::RFP_MARGIN * depth >= beta)
+            {
+                ++stats::current().rfpCutoffs;
                 return staticEval;
+            }
 
             // Child-Node Futility Pruning: at pre-frontier nodes a quiet
             // position whose eval cannot reach alpha returns immediately.
@@ -834,7 +863,11 @@ namespace
         // Skip in PV nodes, shallow nodes, pawn-only endings (zugzwang risk),
         // and when in check. Only try a null move when the static eval already
         // fails high; otherwise it rarely produces a cutoff.
-        if (!pvNode && !inNullVerification && !inCheck && !mateWindow && depth >= tuned::NMP_MIN_DEPTH && hasNonPawn && staticEval >= beta)
+        const bool nmpGate = !pvNode && !inNullVerification && !inCheck && !mateWindow &&
+                             depth >= tuned::NMP_MIN_DEPTH && hasNonPawn;
+        if (nmpGate)
+            ++stats::current().nmpEligible;
+        if (nmpGate && staticEval >= beta)
         {
             // Dynamic null move reduction: deeper nodes and a larger eval
             // margin above beta allow a more aggressive reduction.
@@ -862,10 +895,14 @@ namespace
                     inNullVerification = false;
 
                     if (verify >= beta)
+                    {
+                        ++stats::current().nmpCutoffs;
                         return cutoffScore;
+                    }
                 }
                 else
                 {
+                    ++stats::current().nmpCutoffs;
                     return cutoffScore;
                 }
             }
@@ -877,6 +914,7 @@ namespace
         // assumed to fail high, so the full-width search is skipped.
         if (!pvNode && !inCheck && !mateWindow && depth >= tuned::PROBCUT_DEPTH)
         {
+            ++stats::current().probcutEligible;
             const int probcutBeta = beta + tuned::PROBCUT_MARGIN;
 
             MoveList probcutList;
@@ -903,7 +941,10 @@ namespace
                 if (stopFlag.load(std::memory_order_relaxed))
                     return 0;
                 if (score >= probcutBeta)
+                {
+                    ++stats::current().probcutCutoffs;
                     return score;
+                }
             }
         }
 
@@ -914,18 +955,27 @@ namespace
         if (pvNode && !inIID && !inCheck && !mateWindow && ttMove == Move() &&
             depth >= tuned::IID_DEPTH)
         {
+            ++stats::current().iidCount;
+            const uint64_t iidStart = nodes;
+
             inIID = true;
             alphaBeta(pos, depth - 2, alpha, beta, ply, true);
             inIID = false;
+            stats::current().iidNodes += nodes - iidStart;
 
             if (stopFlag.load(std::memory_order_relaxed))
                 return 0;
-            if (tte.key == key)
-                ttMove = tte.move;
+
+            // The shallower search may have stored a move for this position.
+            tte = tt::probe(key);
+            if (tte != nullptr)
+                ttMove = tte->move;
         }
 
         MoveList list;
         movegen::generate_pseudo_legal_moves(pos, list);
+
+        setContinuationRows(pos, ply);
 
         MovePicker picker;
         picker.init(pos, list, ttMove, counter, ply, false);
@@ -941,6 +991,7 @@ namespace
         int searchedCaptureCount = 0;
 
         int moveCount = 0;
+        ++stats::current().listNodes;
         for (Move m = picker.next(pos); m != Move(); m = picker.next(pos))
         {
             const bool quiet = !m.isPromotion() && !m.isEnPassant() && !m.isCastling() && pos.board[m.to()] == NO_PIECE;
@@ -951,18 +1002,27 @@ namespace
             // node is never mistaken for mate/stalemate.
             if (!pvNode && !inCheck && quiet && legalMoves >= 1 && bestScore > -MATE_THRESHOLD && depth <= tuned::LMP_DEPTH &&
                 moveCount > LMP_TABLE[improving ? 1 : 0][std::min(depth, LMP_MAX_DEPTH)])
+            {
+                ++stats::current().lmpPruned;
                 continue;
+            }
 
             // Move-Level Futility Pruning: skip quiet moves that cannot raise
             // alpha even with a generous positional gain.
             if (!pvNode && !inCheck && quiet && bestScore > -MATE_THRESHOLD && depth <= tuned::MOVE_FUTILITY_DEPTH &&
                 legalMoves >= 1 && staticEval + tuned::MOVE_FUTILITY_MARGIN * depth <= alpha)
+            {
+                ++stats::current().futilityPruned;
                 continue;
+            }
 
             // SEE-Based Quiet Pruning
             if (!pvNode && !inCheck && quiet && legalMoves >= 1 && bestScore > -MATE_THRESHOLD && depth <= tuned::SEE_QUIET_DEPTH &&
                 !see::ge(pos, m, -15 * (depth - 1) * (depth - 1)))
+            {
+                ++stats::current().seeQuietPruned;
                 continue;
+            }
 
             if (ply == 0 && (!inSearchMoves(m) || isExcludedRootMove(m)))
                 continue;
@@ -972,6 +1032,7 @@ namespace
 
             moveStack[ply + 1] = m;
             ++legalMoves;
+            ++stats::current().movesSearched;
             if (quiet)
                 searchedQuiets[searchedQuietCount++] = m;
             else if (!m.isCastling())
@@ -994,6 +1055,11 @@ namespace
                 int r = 0;
                 if (quiet && !givesCheck)
                     r = lmrReduction(pvNode, depth, legalMoves, history[us][m.from()][moveTarget(m)]);
+                if (r > 0)
+                {
+                    ++stats::current().lmrCount;
+                    stats::current().lmrReduction += static_cast<uint64_t>(r);
+                }
 
                 const int newDepth = std::max(0, depth - 1 - r);
 
@@ -1002,7 +1068,17 @@ namespace
 
                 // LMR re-search: verify at full depth if the reduced search beat alpha.
                 if (r > 0 && score > alpha)
+                {
+                    ++stats::current().lmrFailHigh;
+                    ++stats::current().lmrResearch;
+                    const uint64_t reSearchStart = nodes;
                     score = -alphaBeta(pos, depth - 1, -alpha - 1, -alpha, ply + 1, false);
+                    stats::current().lmrResearchNodes += nodes - reSearchStart;
+                    if (score > alpha)
+                        ++stats::current().lmrVerified;
+                    else
+                        ++stats::current().lmrRefuted;
+                }
 
                 if (score > alpha && score < beta)
                     score = -alphaBeta(pos, depth - 1, -beta, -alpha, ply + 1, true);
@@ -1026,6 +1102,14 @@ namespace
 
                     if (alpha >= beta)
                     {
+                        ++stats::current().cutNodes;
+                        if (legalMoves == 1)
+                            ++stats::current().firstCutoffs;
+                        if (legalMoves <= 3)
+                            ++stats::current().earlyCutoffs;
+                        if (ttMove != Move() && m == ttMove)
+                            ++stats::current().ttMoveCutoffs;
+
                         if (quiet)
                         {
                             if (prevMove != Move())
@@ -1041,6 +1125,27 @@ namespace
                             updateHistory(history[us][m.from()][moveTarget(m)], bonus);
                             for (int k = 0; k < searchedQuietCount - 1; ++k)
                                 updateHistory(history[us][searchedQuiets[k].from()][moveTarget(searchedQuiets[k])], -bonus);
+
+                            const Piece piece = pos.board[m.from()];
+                            const Square to = moveTarget(m);
+                            for (int i = 0; i < CONT_PLIES; ++i)
+                            {
+                                if (contRows[i][ply] == nullptr)
+                                    continue;
+                                updateHistory(contRows[i][ply][pieceToIndex(piece, to)], bonus);
+                                for (int k = 0; k < searchedQuietCount - 1; ++k)
+                                {
+                                    const Move q = searchedQuiets[k];
+                                    updateHistory(contRows[i][ply][pieceToIndex(pos.board[q.from()], moveTarget(q))], -bonus);
+                                }
+                            }
+
+                            updateHistory(pawnHistoryEntry(pos, piece, to), bonus);
+                            for (int k = 0; k < searchedQuietCount - 1; ++k)
+                            {
+                                const Move q = searchedQuiets[k];
+                                updateHistory(pawnHistoryEntry(pos, pos.board[q.from()], moveTarget(q)), -bonus);
+                            }
                         }
                         else
                         {
@@ -1058,7 +1163,7 @@ namespace
         if (legalMoves == 0)
         {
             const int score = inCheck ? -MATE + ply : 0;
-            ttStore(key, Move(), score, depth, BOUND_EXACT, ply);
+            tt::store(key, Move(), score, depth, BOUND_EXACT, ply);
             return score;
         }
 
@@ -1073,7 +1178,7 @@ namespace
                 bound = BOUND_EXACT;
 
             // The in-check value is a mate-distance score, not an eval.
-            ttStore(key, bestMove, bestScore, depth, bound, ply, inCheck ? NO_EVAL : staticEval);
+            tt::store(key, bestMove, bestScore, depth, bound, ply, inCheck ? NO_EVAL : staticEval);
         }
 
         return bestScore;
@@ -1081,6 +1186,8 @@ namespace
 
     int quiescence(Position &pos, int alpha, int beta, int ply)
     {
+        ++stats::current().qnodes;
+
         // As in alphaBeta: a node that returns immediately must not leave a
         // stale PV behind for its parent to copy.
         pvLength[ply] = ply;
@@ -1107,14 +1214,17 @@ namespace
         if (pos.halfmoveClock >= 100 || pos.isRepetition(ply) || isInsufficientMaterial(pos))
             return drawScore(pos);
 
-        const TTEntry &qtte = ttEntry(pos.zobristKey);
-        const int standPat = (qtte.key == pos.zobristKey && qtte.eval != NO_EVAL)
-                                 ? qtte.eval
+        const tt::Entry *qtte = tt::probe(pos.zobristKey);
+        const int standPat = (qtte != nullptr && qtte->eval != NO_EVAL)
+                                 ? qtte->eval
                                  : evaluate::evaluate(pos);
         if (!inCheck)
         {
             if (standPat >= beta)
+            {
+                ++stats::current().standPatCutoffs;
                 return standPat;
+            }
             if (standPat > alpha)
                 alpha = standPat;
         }
@@ -1124,6 +1234,8 @@ namespace
             movegen::generate_pseudo_legal_moves(pos, list);
         else
             movegen::generate_tactical_moves(pos, list);
+
+        setContinuationRows(pos, ply);
 
         MovePicker picker;
         picker.init(pos, list, Move(), counter, ply, !inCheck);
@@ -1135,7 +1247,10 @@ namespace
             {
                 const int seeScore = picker.lastSeeValid ? picker.lastSee : (see::ge(pos, m, 0) ? 1 : -1);
                 if (seeScore < 0)
+                {
+                    ++stats::current().seeRejects;
                     continue;
+                }
             }
 
             if (!pos.do_move(m))
@@ -1155,7 +1270,10 @@ namespace
                 pvLength[ply] = pvLength[ply + 1];
 
                 if (score >= beta)
+                {
+                    ++stats::current().qsearchCutoffs;
                     return score;
+                }
             }
         }
 
@@ -1234,11 +1352,11 @@ namespace
 
         while (complete && played < MAX_PLY - 1)
         {
-            const TTEntry &e = ttEntry(pos.zobristKey);
-            if (e.key != pos.zobristKey || e.move == Move())
+            const tt::Entry *e = tt::probe(pos.zobristKey);
+            if (e == nullptr || e->move == Move())
                 break;
 
-            const Move m = e.move;
+            const Move m = e->move;
             if (!pos.do_move(m))
                 break;
 
@@ -1279,11 +1397,12 @@ namespace
         std::memset(killers, 0, sizeof(killers));
         std::memset(history, 0, sizeof(history));
         std::memset(captureHistory, 0, sizeof(captureHistory));
+        acquireHistorySlices();
         std::fill(moveStack, moveStack + MAX_PLY + 2, Move());
         std::memset(pvTable, 0, sizeof(pvTable));
         std::memset(pvLength, 0, sizeof(pvLength));
         excludedRootMoves.clear();
-        ttFilledLocal = 0;
+        stats::current() = stats::Tally{};
 
         // A root without a single legal move (checkmate/stalemate) has nothing to search
         bool rootHasLegalMove = false;
@@ -1302,10 +1421,10 @@ namespace
 
         if (isMain && rootHasLegalMove)
         {
-            const TTEntry &e = ttEntry(pos.zobristKey);
-            if (e.key == pos.zobristKey && e.move != Move())
+            const tt::Entry *e = tt::probe(pos.zobristKey);
+            if (e != nullptr && e->move != Move())
             {
-                const int s = scoreFromTT(e.score, 0);
+                const int s = tt::scoreFromTT(e->score, 0);
                 if ((s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD) && hasMateProof(pos, 0, s))
                 {
                     seldepth = pvLength[0];
@@ -1418,7 +1537,12 @@ namespace
         }
 
         globalNodes.fetch_add(nodes, std::memory_order_relaxed);
-        ttFilled.fetch_add(ttFilledLocal, std::memory_order_relaxed);
+        tt::flushFilled();
+
+        stats::Tally &tally = stats::current();
+        tally.nodes = nodes;
+        stats::record(workerId, seldepth, isMain ? completedDepth : 0);
+
         waitForStop();
     }
 
@@ -1444,22 +1568,23 @@ int search::clampOption(const char *name, int value, int minValue, int maxValue)
 void search::init()
 {
     movegen::init();
-    ttResize(static_cast<size_t>(hashSizeMb));
+    tt::resize(static_cast<size_t>(hashSizeMb));
 }
 
 void search::clear()
 {
-    clearTT();
+    tt::clear();
     std::memset(counterMoves, 0, sizeof(counterMoves));
+    clearHistorySlices();
 }
 
 void search::go(const Position &root, const SearchLimits &limits)
 {
     // Lazily initialize the attack tables and transposition table if needed.
-    if (tt.empty())
+    if (!tt::allocated())
     {
         movegen::init();
-        ttResize(static_cast<size_t>(hashSizeMb));
+        tt::resize(static_cast<size_t>(hashSizeMb));
     }
 
     activeLimits = limits;
@@ -1504,6 +1629,12 @@ void search::go(const Position &root, const SearchLimits &limits)
     completedDepth = 0;
     finalBestMove = Move();
 
+    tt::newSearch();
+
+    // A reporting search starts from an empty record set.
+    if (stats::reporting())
+        stats::clearRecords();
+
     computeDeadline(limits, root.sideToMove);
     maxDepth = limits.depth > 0 ? limits.depth : MAX_DEPTH;
 
@@ -1539,6 +1670,9 @@ void search::go(const Position &root, const SearchLimits &limits)
             }
         }
     }
+
+    if (stats::reporting())
+        stats::print();
 
     if (!bestmoveEmitted.load(std::memory_order_relaxed) && !silentOutput)
     {
@@ -1592,7 +1726,7 @@ void search::setHashSize(int megabytes)
         return;
 
     // The table is allocated lazily; only a live table can fail to grow.
-    if (tt.empty())
+    if (!tt::allocated())
     {
         hashSizeMb = megabytes;
         return;
@@ -1600,7 +1734,7 @@ void search::setHashSize(int megabytes)
 
     try
     {
-        ttResize(static_cast<size_t>(megabytes));
+        tt::resize(static_cast<size_t>(megabytes));
     }
     catch (const std::bad_alloc &)
     {

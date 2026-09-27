@@ -6,6 +6,7 @@
 
 #include "movegen.h"
 #include "position.h"
+#include "stats.h"
 #include "tuned_params.h"
 
 #include <algorithm>
@@ -930,6 +931,8 @@ int evaluate::hce(const Position &pos)
 
 int evaluate::evaluate(const Position &pos)
 {
+    ++stats::current().evalCalls;
+
 #ifdef KURGAN_NNUE
     if (nnue::active())
         return nnue::evaluate(pos);

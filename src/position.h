@@ -90,6 +90,7 @@ public:
 
     // Incrementally maintained Zobrist hash of the position.
     uint64_t zobristKey = 0;
+    uint64_t pawnKey = 0;
 
 private:
     static constexpr int MAX_UNDO = 256;

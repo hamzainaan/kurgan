@@ -167,6 +167,7 @@ void Position::clear()
     halfmoveClock = 0;
     fullmoveNumber = 1;
     zobristKey = 0;
+    pawnKey = 0;
     undoCount = 0;
     historyCount = 0;
     historyStart = 0;
@@ -237,6 +238,8 @@ void Position::putPiece(Piece piece, Square square)
     byColor[colorOf(piece)] |= bit;
     byType[typeOf(piece)] |= bit;
     zobristKey ^= pieceKeys[piece][square];
+    if (typeOf(piece) == PAWN)
+        pawnKey ^= pieceKeys[piece][square];
     nnue::update(*this, piece, square, true);
 }
 
@@ -251,6 +254,8 @@ void Position::removePiece(Square square)
     byColor[colorOf(piece)] &= notBit;
     byType[typeOf(piece)] &= notBit;
     zobristKey ^= pieceKeys[piece][square];
+    if (typeOf(piece) == PAWN)
+        pawnKey ^= pieceKeys[piece][square];
     nnue::update(*this, piece, square, false);
 }
 

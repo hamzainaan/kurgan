@@ -1,6 +1,7 @@
 #include "nnue.h"
 
 #include "position.h"
+#include "stats.h"
 
 #include <cstring>
 #include <vector>
@@ -285,6 +286,8 @@ namespace
 
     void rebuildHalf(const Position &pos, const Network &net, int colour)
     {
+        ++stats::current().evalRebuilds;
+
         Tracker &t = g_tracker;
         const Square king = perspectiveKing(pos, colour);
         int16_t *acc = t.values[colour];
@@ -460,12 +463,16 @@ void nnue::update(const Position &pos, Piece piece, Square square, bool add)
         t.dirty |= static_cast<uint8_t>(1 << pieceColour); // it indexes its own perspective
 
     const Network &net = *g_net;
+    int applied = 0;
     for (int c = 0; c < COLOR_NB; ++c)
     {
         if (t.dirty & (1 << c))
             continue; // the pending rebuild covers this half
         addRow(t.values[c], net, featureIndex(c, perspectiveKing(pos, c), pieceColour, type, square), add);
+        ++applied;
     }
+
+    stats::current().evalUpdates += static_cast<uint64_t>(applied);
 }
 
 int nnue::evaluate(const Position &pos)

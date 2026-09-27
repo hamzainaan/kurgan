@@ -7,6 +7,7 @@
 #include "perft.h"
 #include "position.h"
 #include "search.h"
+#include "stats.h"
 #include "version.h"
 
 #include <chrono>
@@ -254,6 +255,7 @@ void uci::loop()
                       << " max " << search::CONTEMPT_MAX << std::endl;
             std::cout << "option name UCI_Chess960 type check default false" << std::endl;
             std::cout << "option name Use NNUE type check default true" << std::endl;
+            std::cout << "option name Search Stats type check default false" << std::endl;
             if (nnue::loaded())
                 std::cout << "info string evaluation nnue (" << nnue::file() << ") id " << std::hex
                           << nnue::hash() << std::dec << std::endl;
@@ -324,6 +326,8 @@ void uci::loop()
                     search::clear();
                 else if (name == "Use NNUE")
                     nnue::setEnabled(value == "true");
+                else if (name == "Search Stats")
+                    stats::setReporting(value == "true");
                 else if (!search::setTuningOption(name, std::stoi(value)))
                     std::cout << "info string unknown option " << name << std::endl;
             }
