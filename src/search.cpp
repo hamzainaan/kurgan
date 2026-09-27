@@ -7,6 +7,7 @@
 #include "tuned_params.h"
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cstring>
 #include <iostream>
@@ -31,6 +32,24 @@ namespace
         {0, 2, 3, 5, 9, 13, 18, 25, 34, 45, 55},
         {0, 5, 6, 9, 14, 21, 30, 41, 55, 69, 84},
     };
+
+    // Dynamic time management. The optimum move time is the base clock
+    // allocation interpolated between TIME_SCALE_MIN and TIME_SCALE_MAX by the
+    // criticality of the position, a blend of the opponent's pressure (the cp
+    // their replies take from our score), the score swing between iterations,
+    // the root move still changing and the game stage.
+    constexpr double PRESSURE_EMA = 0.5;      // weight of the latest move in the pressure average
+    constexpr double PRESSURE_SCALE = 120.0;  // cp of average loss where the opponent's pressure saturates
+    constexpr double SWING_SCALE = 50.0;      // cp of between-iteration swing that counts as unstable
+    constexpr double STABLE_ITERATIONS = 6.0; // iterations without a root move change that count as calm
+    constexpr double DECIDED_SCORE = 500.0;   // cp where the result looks decided and time stops mattering
+    constexpr double TIME_SCALE_MIN = 0.75;   // calm position: fraction of the base allocation
+    constexpr double TIME_SCALE_MAX = 1.35;   // critical position: fraction of the base allocation
+    constexpr double PRESSURE_W = 0.40;       // criticality weights, in the order they are summed
+    constexpr double SWING_W = 0.25;
+    constexpr double INSTABILITY_W = 0.20;
+    constexpr double STAGE_W = 0.15;
+    constexpr double DECIDED_W = 0.25;
 
     // Runtime-tunable pruning parameters, exposed as UCI spin options.
     struct TuningParam
@@ -60,7 +79,6 @@ namespace
         {"ProbCut Margin", &tuned::PROBCUT_MARGIN, 0, 300},
         {"IID Depth", &tuned::IID_DEPTH, 2, 12},
         {"LMP Depth", &tuned::LMP_DEPTH, 0, 10},
-        {"Move Budget", &tuned::MOVE_BUDGET, 0, 5000000},
     };
 
     // Transposition table bounds.
@@ -84,13 +102,13 @@ namespace
     alignas(64) std::atomic<bool> ponderHitFlag{false};
     alignas(64) std::atomic<bool> bestmoveEmitted{false};
 
-    // Throughput of the previous search, used to express the time allocation in nodes.
-    std::atomic<int64_t> lastNps{0};
-    constexpr int64_t FALLBACK_NPS = 1500000;
+    int64_t lastScore = 0;
+    bool hasLastScore = false;
+    double pressure = 0.0;
 
-    std::chrono::steady_clock::time_point deadline;     // hard limit: always stop here
-    std::chrono::steady_clock::time_point softDeadline; // optimum: stop early when stable
+    std::chrono::steady_clock::time_point deadline; // hard limit: always stop here
     std::chrono::steady_clock::time_point searchStart;
+    int64_t baseOptimumMs = 0; // early stop budget, zero disables the early stop
     int maxDepth = MAX_DEPTH;
     int hashSizeMb = 16;
     int threadCountSetting = 1;
@@ -239,32 +257,21 @@ namespace
     void computeDeadline(const search::SearchLimits &limits, Color us)
     {
         searchStart = std::chrono::steady_clock::now();
+        baseOptimumMs = 0;
 
         if (limits.movetime > 0)
         {
             deadline = searchStart + std::chrono::milliseconds(limits.movetime);
-            softDeadline = deadline;
         }
         else if (limits.wtime > 0 || limits.btime > 0)
         {
             const int64_t myTime = us == WHITE ? limits.wtime : limits.btime;
             const int64_t myInc = us == WHITE ? limits.winc : limits.binc;
 
-            int64_t optimum = myTime / 40 + myInc / 2;
 
-            // The search's tactical accuracy stops improving
-            // meaningfully past a certain number of nodes, so there is no point
-            // buying more of them.
-            if (tuned::MOVE_BUDGET > 0)
-            {
-                const int64_t nps = lastNps.load(std::memory_order_relaxed);
-                const int64_t budgetMs = std::max<int64_t>(
-                    1, static_cast<int64_t>(tuned::MOVE_BUDGET) * 1000 /
-                           (nps > 0 ? nps : FALLBACK_NPS));
-                optimum = std::min(optimum, budgetMs);
-            }
+            baseOptimumMs = myTime / 40 + myInc / 2;
 
-            int64_t maximum = optimum * 2;
+            int64_t maximum = baseOptimumMs * 2;
             if (maximum > myTime / 8)
                 maximum = myTime / 8;
 
@@ -273,19 +280,38 @@ namespace
                 maximum = myTime - 50;
             if (maximum < 1)
                 maximum = 1;
-            if (optimum > maximum)
-                optimum = maximum;
-            if (optimum < 1)
-                optimum = 1;
+            if (baseOptimumMs > maximum)
+                baseOptimumMs = maximum;
+            if (baseOptimumMs < 1)
+                baseOptimumMs = 1;
 
-            softDeadline = searchStart + std::chrono::milliseconds(optimum);
             deadline = searchStart + std::chrono::milliseconds(maximum);
         }
         else
         {
             deadline = searchStart + std::chrono::hours(24);
-            softDeadline = deadline;
         }
+    }
+
+    // How critical the position looks.
+    double criticality(const Position &pos, int score, int scoreDrop, int stableIterations)
+    {
+        const int swing = scoreDrop < 0 ? -scoreDrop : scoreDrop;
+        const int decidedScore = score < 0 ? -score : score;
+
+        const double pressureTerm = std::min(1.0, pressure / PRESSURE_SCALE);
+        const double swingTerm = std::min(1.0, swing / SWING_SCALE);
+        const double instability = 1.0 - std::min(1.0, stableIterations / STABLE_ITERATIONS);
+
+        const double pieces = static_cast<double>(std::popcount(pos.byColor[WHITE] | pos.byColor[BLACK]));
+        const double phase = std::clamp((32.0 - pieces) / 20.0, 0.0, 1.0);
+        const double stage = 1.0 - 2.0 * (phase < 0.5 ? 0.5 - phase : phase - 0.5);
+
+        const double decided = std::min(1.0, decidedScore / DECIDED_SCORE);
+
+        return std::clamp(PRESSURE_W * pressureTerm + SWING_W * swingTerm + INSTABILITY_W * instability
+                              + STAGE_W * stage - DECIDED_W * decided,
+                          0.0, 1.0);
     }
 
     void checkTime()
@@ -1441,6 +1467,7 @@ namespace
 
         const auto start = std::chrono::steady_clock::now();
         int previousScore = 0;
+        int lastCompletedScore = 0;
 
         // Dynamic time management state
         Move stableMove;
@@ -1470,6 +1497,7 @@ namespace
                 {
                     scoreDrop = previousScore - score; // > 0 means the score fell
                     previousScore = score;
+                    lastCompletedScore = score;
                 }
 
                 // Only the main thread reports.
@@ -1527,13 +1555,35 @@ namespace
                     stableIterations = 0;
                 }
 
-                if (stableIterations >= 3 && scoreDrop <= 0 &&
-                    std::chrono::steady_clock::now() >= softDeadline)
+                const double scale = TIME_SCALE_MIN
+                                     + (TIME_SCALE_MAX - TIME_SCALE_MIN)
+                                           * criticality(pos, previousScore, scoreDrop, stableIterations);
+                const int64_t elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                            std::chrono::steady_clock::now() - start)
+                                            .count();
+                const int64_t optimumMs = static_cast<int64_t>(static_cast<double>(baseOptimumMs) * scale);
+
+                if (baseOptimumMs > 0 && stableIterations >= 3 && scoreDrop <= 0 && elapsed >= optimumMs)
                     stopFlag.store(true, std::memory_order_relaxed);
             }
 
             if (depth >= maxDepth)
                 break;
+        }
+
+        if (isMain && completedDepth > 0)
+        {
+            const int64_t scoreCp = lastScore < 0 ? -lastScore : lastScore;
+            const int64_t completedCp = lastCompletedScore < 0 ? -lastCompletedScore : lastCompletedScore;
+
+            if (hasLastScore && scoreCp < MATE_THRESHOLD && completedCp < MATE_THRESHOLD)
+            {
+                const int64_t drop = lastScore > lastCompletedScore ? lastScore - lastCompletedScore : 0;
+                pressure += PRESSURE_EMA * (static_cast<double>(drop) - pressure);
+            }
+
+            lastScore = lastCompletedScore;
+            hasLastScore = true;
         }
 
         globalNodes.fetch_add(nodes, std::memory_order_relaxed);
@@ -1576,6 +1626,9 @@ void search::clear()
     tt::clear();
     std::memset(counterMoves, 0, sizeof(counterMoves));
     clearHistorySlices();
+    lastScore = 0;
+    hasLastScore = false;
+    pressure = 0.0;
 }
 
 void search::go(const Position &root, const SearchLimits &limits)
@@ -1679,15 +1732,6 @@ void search::go(const Position &root, const SearchLimits &limits)
         std::lock_guard<std::mutex> lock(outputMutex);
         std::cout << "bestmove " << (finalBestMove == Move() ? "0000" : moveToUci(finalBestMove)) << std::endl;
     }
-
-    // Remember the throughput so the next move's time allocation can be
-    // expressed as a node budget.
-    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                               std::chrono::steady_clock::now() - searchStart)
-                               .count();
-    const uint64_t searched = searchedNodes.load(std::memory_order_relaxed);
-    if (elapsedMs > 0 && searched > 0)
-        lastNps.store(static_cast<int64_t>(searched) * 1000 / elapsedMs, std::memory_order_relaxed);
 
     stopFlag.store(false, std::memory_order_relaxed);
     searching.store(false, std::memory_order_relaxed);
