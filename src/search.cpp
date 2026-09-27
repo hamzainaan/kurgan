@@ -82,7 +82,6 @@ namespace
     alignas(64) std::atomic<bool> searching{false};
     alignas(64) std::atomic<bool> ponderFlag{false};
     alignas(64) std::atomic<bool> ponderHitFlag{false};
-    alignas(64) std::atomic<bool> bestmoveEmitted{false};
 
     int maxDepth = MAX_DEPTH;
     int hashSizeMb = 16;
@@ -250,25 +249,7 @@ namespace
 
         if (ponderFlag.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed))
         {
-            bool expected = false;
-            if (bestmoveEmitted.compare_exchange_strong(expected, true))
-            {
-                Move bm;
-                Move pm;
-                {
-                    std::lock_guard<std::mutex> lock(bestMutex);
-                    bm = finalBestMove;
-                    pm = finalPonderMove;
-                }
-                if (!silentOutput)
-                {
-                    std::lock_guard<std::mutex> lock(outputMutex);
-                    std::cout << "bestmove " << (bm == Move() ? "0000" : moveToUci(bm));
-                    if (pm != Move())
-                        std::cout << " ponder " << moveToUci(pm);
-                    std::cout << std::endl;
-                }
-            }
+            // Ponder search must not answer before ponderhit or stop.
             manager::postpone();
             return;
         }
@@ -1536,15 +1517,8 @@ void search::clear()
     manager::reset();
 }
 
-void search::go(const Position &root, const SearchLimits &limits)
+void search::prepare(const Position &root, const SearchLimits &limits)
 {
-    // Lazily initialize the attack tables and transposition table if needed.
-    if (!tt::allocated())
-    {
-        movegen::init();
-        tt::resize(static_cast<size_t>(hashSizeMb));
-    }
-
     activeLimits = limits;
 
     // A searchmoves list without a single legal root move would leave the root
@@ -1580,7 +1554,19 @@ void search::go(const Position &root, const SearchLimits &limits)
     // Never ponder unless it has been enabled.
     ponderFlag.store(limits.ponder && ponderSetting, std::memory_order_relaxed);
     ponderHitFlag.store(false, std::memory_order_relaxed);
-    bestmoveEmitted.store(false, std::memory_order_relaxed);
+    stopFlag.store(false, std::memory_order_relaxed);
+    manager::computeDeadline(limits, root.sideToMove);
+}
+
+void search::go(const Position &root, const SearchLimits &limits)
+{
+    // Lazily initialize the attack tables and transposition table if needed.
+    if (!tt::allocated())
+    {
+        movegen::init();
+        tt::resize(static_cast<size_t>(hashSizeMb));
+    }
+
     searching.store(true, std::memory_order_relaxed);
     globalNodes.store(0, std::memory_order_relaxed);
     searchedNodes.store(0, std::memory_order_relaxed);
@@ -1594,7 +1580,6 @@ void search::go(const Position &root, const SearchLimits &limits)
     if (stats::reporting())
         stats::clearRecords();
 
-    manager::computeDeadline(limits, root.sideToMove);
     maxDepth = limits.depth > 0 ? limits.depth : MAX_DEPTH;
 
     const unsigned nThreads = static_cast<unsigned>(threadCount());
@@ -1633,7 +1618,7 @@ void search::go(const Position &root, const SearchLimits &limits)
     if (stats::reporting())
         stats::print();
 
-    if (!bestmoveEmitted.load(std::memory_order_relaxed) && !silentOutput)
+    if (!silentOutput)
     {
         std::lock_guard<std::mutex> lock(outputMutex);
         std::cout << "bestmove " << (finalBestMove == Move() ? "0000" : moveToUci(finalBestMove));
@@ -1649,11 +1634,6 @@ void search::go(const Position &root, const SearchLimits &limits)
 void search::stop()
 {
     stopFlag.store(true, std::memory_order_relaxed);
-}
-
-void search::resetStop()
-{
-    stopFlag.store(false, std::memory_order_relaxed);
 }
 
 bool search::isRunning()
@@ -1769,7 +1749,6 @@ void search::ponderhit()
     if (!ponderFlag.load(std::memory_order_relaxed))
         return;
     ponderHitFlag.store(true, std::memory_order_relaxed);
-    bestmoveEmitted.store(false, std::memory_order_relaxed);
     manager::computeDeadline(activeLimits, activeUs);
 }
 

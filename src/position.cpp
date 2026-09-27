@@ -2,6 +2,7 @@
 #include "movegen.h"
 #include "nnue.h"
 
+#include <algorithm>
 #include <iostream>
 #include <sstream>
 
@@ -648,6 +649,9 @@ bool Position::set_fen(const std::string &fen)
     }
     if (halfmoveClock < 0 || fullmoveNumber < 1)
         return false;
+
+    halfmoveClock = std::min(halfmoveClock, 1000000);
+    fullmoveNumber = std::min(fullmoveNumber, 1000000);
 
     // Finalize the Zobrist key with side, castling, and en passant components.
     zobristKey ^= sideToMove == BLACK ? sideKey : 0;

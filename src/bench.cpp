@@ -41,7 +41,6 @@ void bench::run(int depth)
     search::setThreads(1);
     search::setHashSize(BENCH_HASH_MB);
     search::setSilent(true);
-    search::resetStop();
     stats::clearRecords();
 
     const auto start = std::chrono::steady_clock::now();
@@ -57,6 +56,7 @@ void bench::run(int depth)
 
         search::SearchLimits limits;
         limits.depth = depth;
+        search::prepare(pos, limits);
         search::go(pos, limits);
 
         const uint64_t n = search::totalNodes();

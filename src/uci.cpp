@@ -345,7 +345,7 @@ void uci::loop()
         {
             joinSearch();
             const search::SearchLimits limits = parseGo(ss, pos);
-            search::resetStop();
+            search::prepare(pos, limits);
             searchActive = true;
             searchThread = std::thread([pos, limits]()
                                        { search::go(pos, limits); });
@@ -411,8 +411,14 @@ void uci::loop()
         else if (cmd == "debug")
         {
             joinSearch();
-            pos.print_board();
-            std::cout << "Fen: " << pos.fen() << std::endl;
+
+            std::string arg;
+            ss >> arg;
+            if (arg != "on" && arg != "off")
+            {
+                pos.print_board();
+                std::cout << "Fen: " << pos.fen() << std::endl;
+            }
         }
         else if (cmd == "bench")
         {

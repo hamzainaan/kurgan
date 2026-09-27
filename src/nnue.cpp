@@ -448,24 +448,22 @@ bool nnue::loadFromMemory(const uint8_t *data, size_t size, const std::string &n
     }
 
     Network net;
-    net.ft.resize(static_cast<size_t>(INPUT_SIZE) * HALF_DIM);
-    net.ftBias.resize(HALF_DIM);
-    net.l2.resize(static_cast<size_t>(OUTPUT_BUCKETS) * 2 * HALF_DIM);
-    net.l2Bias.resize(OUTPUT_BUCKETS);
 
-    size_t offset = 0;
-    const auto take = [&](void *dst, size_t bytes)
+    // Copy each block straight from the mapped payload.
+    const int16_t *words = reinterpret_cast<const int16_t *>(data);
+    size_t at = 0;
+    const auto take = [&](std::vector<int16_t> &dst, size_t count)
     {
-        std::memcpy(dst, data + offset, bytes);
-        offset += bytes;
+        dst.assign(words + at, words + at + count);
+        at += count;
     };
-    take(net.ft.data(), net.ft.size() * sizeof(int16_t));
-    take(net.ftBias.data(), net.ftBias.size() * sizeof(int16_t));
-    take(net.l2.data(), net.l2.size() * sizeof(int16_t));
-    take(net.l2Bias.data(), net.l2Bias.size() * sizeof(int16_t));
+    take(net.ft, static_cast<size_t>(INPUT_SIZE) * HALF_DIM);
+    take(net.ftBias, HALF_DIM);
+    take(net.l2, static_cast<size_t>(OUTPUT_BUCKETS) * 2 * HALF_DIM);
+    take(net.l2Bias, OUTPUT_BUCKETS);
 
     net.hash = fnv1a(data, size);
-    g_net = new Network(net);
+    g_net = new Network(std::move(net));
     g_file = name;
     g_hash = net.hash;
     g_error.clear();

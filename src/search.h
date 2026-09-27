@@ -37,7 +37,10 @@ namespace search
 
     // Request the search to stop at the next opportunity.
     void stop();
-    void resetStop();
+
+    // Establish per-search handshake state on the command thread before the
+    // search thread is launched, so a pipelined stop/ponderhit cannot race it.
+    void prepare(const Position &root, const SearchLimits &limits);
 
     // The opponent played the pondered move: continue with real time.
     void ponderhit();
