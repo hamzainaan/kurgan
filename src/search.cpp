@@ -100,6 +100,7 @@ namespace
     bool silentOutput = false;
     int completedDepth = 0;
     Move finalBestMove;
+    Move finalPonderMove;
 
     // Per-thread search state.
     thread_local uint64_t nodes = 0;
@@ -253,14 +254,19 @@ namespace
             if (bestmoveEmitted.compare_exchange_strong(expected, true))
             {
                 Move bm;
+                Move pm;
                 {
                     std::lock_guard<std::mutex> lock(bestMutex);
                     bm = finalBestMove;
+                    pm = finalPonderMove;
                 }
                 if (!silentOutput)
                 {
                     std::lock_guard<std::mutex> lock(outputMutex);
-                    std::cout << "bestmove " << (bm == Move() ? "0000" : moveToUci(bm)) << std::endl;
+                    std::cout << "bestmove " << (bm == Move() ? "0000" : moveToUci(bm));
+                    if (pm != Move())
+                        std::cout << " ponder " << moveToUci(pm);
+                    std::cout << std::endl;
                 }
             }
             manager::postpone();
@@ -1374,6 +1380,7 @@ namespace
                     {
                         completedDepth = 1;
                         finalBestMove = pvTable[0][0];
+                        finalPonderMove = Move();
                     }
                 }
             }
@@ -1437,6 +1444,7 @@ namespace
                         {
                             completedDepth = depth;
                             finalBestMove = pvTable[0][0];
+                            finalPonderMove = pvLength[0] > 1 ? pvTable[0][1] : Move();
                         }
                     }
                 }
@@ -1578,6 +1586,7 @@ void search::go(const Position &root, const SearchLimits &limits)
     searchedNodes.store(0, std::memory_order_relaxed);
     completedDepth = 0;
     finalBestMove = Move();
+    finalPonderMove = Move();
 
     tt::newSearch();
 
@@ -1627,7 +1636,10 @@ void search::go(const Position &root, const SearchLimits &limits)
     if (!bestmoveEmitted.load(std::memory_order_relaxed) && !silentOutput)
     {
         std::lock_guard<std::mutex> lock(outputMutex);
-        std::cout << "bestmove " << (finalBestMove == Move() ? "0000" : moveToUci(finalBestMove)) << std::endl;
+        std::cout << "bestmove " << (finalBestMove == Move() ? "0000" : moveToUci(finalBestMove));
+        if (finalPonderMove != Move())
+            std::cout << " ponder " << moveToUci(finalPonderMove);
+        std::cout << std::endl;
     }
 
     stopFlag.store(false, std::memory_order_relaxed);
