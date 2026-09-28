@@ -698,15 +698,7 @@ namespace
         const Move prevMove = moveStack[ply];
         const Move counter = prevMove == Move() ? Move() : counterMoves[us][prevMove.from()][moveTarget(prevMove)];
 
-        // Deterministic draws are cached in the transposition table.
-        if (ply > 0 && (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos)))
-        {
-            const int draw = drawScore(pos);
-            if (excluded == Move())
-                tt::store(key, Move(), draw, depth, BOUND_EXACT, ply);
-            return draw;
-        }
-        if (ply > 0 && pos.isRepetition(ply))
+        if (ply > 0 && (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos) || pos.isRepetition(ply)))
             return drawScore(pos);
 
         // Transposition table probe.
@@ -1128,7 +1120,7 @@ namespace
         {
             if (excluded != Move())
                 return alpha;
-            const int score = inCheck ? -MATE + ply : 0;
+            const int score = inCheck ? -MATE + ply : drawScore(pos);
             tt::store(key, Move(), score, depth, BOUND_EXACT, ply);
             return score;
         }

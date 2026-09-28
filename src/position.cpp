@@ -451,6 +451,10 @@ void Position::do_null_move()
 
     // Hash: flip side and clear the en passant square.
     zobristKey ^= sideKey ^ epKey(undo.prevEnPassantSquare);
+
+    historyStart = historyCount;
+    historyKeys[historyCount & (MAX_HISTORY - 1)] = zobristKey;
+    ++historyCount;
 }
 
 void Position::undo_null_move()
