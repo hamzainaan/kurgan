@@ -131,8 +131,8 @@ void tt::store(uint64_t key, Move move, int score, int depth, int bound, int ply
     {
         if (e.key == key)
         {
-            if (!protectedMate(e, key, bound))
-                save(e, key, move, score, depth, bound, ply, eval);
+            if (!protectedMate(e, key, bound) && (bound == BOUND_EXACT || depth + 4 > e.depth || e.age(generation) != 0))
+                save(e, key, move == Move() ? e.move : move, score, depth, bound, ply, eval);
             return;
         }
         if (freeSlot == nullptr && e.empty())
