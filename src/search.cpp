@@ -267,7 +267,7 @@ namespace
             return;
         }
 
-        if (std::chrono::steady_clock::now() < manager::deadline())
+        if (workerId != 0 || std::chrono::steady_clock::now() < manager::deadline())
             return;
 
         if (ponderFlag.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed))
@@ -276,6 +276,9 @@ namespace
             manager::postpone();
             return;
         }
+
+        if (manager::extend())
+            return;
 
         stopFlag.store(true, std::memory_order_relaxed);
     }
@@ -1547,6 +1550,8 @@ namespace
                     stableIterations = 0;
                 }
 
+                manager::observe(previousScore, scoreDrop, stableIterations);
+
                 const int64_t elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                                             std::chrono::steady_clock::now() - start)
                                             .count();
@@ -1644,6 +1649,7 @@ void search::prepare(const Position &root, const SearchLimits &limits)
     ponderFlag.store(limits.ponder && ponderSetting, std::memory_order_relaxed);
     ponderHitFlag.store(false, std::memory_order_relaxed);
     stopFlag.store(false, std::memory_order_relaxed);
+    manager::analyzeRoot(root, static_cast<int>(activeLimits.searchmoves.size()));
     manager::computeDeadline(limits, root.sideToMove);
 }
 
