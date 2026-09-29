@@ -56,6 +56,9 @@ namespace search
     constexpr int MULTIPV_MAX = 64;
     constexpr int CONTEMPT_MIN = -200;
     constexpr int CONTEMPT_MAX = 200;
+    constexpr int MOVE_OVERHEAD_MIN = 0;
+    constexpr int MOVE_OVERHEAD_MAX = 5000;
+    constexpr int MOVE_OVERHEAD_DEFAULT = 10;
 
     int clampOption(const char *name, int value, int minValue, int maxValue);
 
@@ -65,6 +68,7 @@ namespace search
     void setMultiPV(int value);
     void setContempt(int value);
     void setPonder(bool enabled);
+    void setMoveOverhead(int ms);
     int hashSize();
     int threadCount();
     int maxThreadCount();

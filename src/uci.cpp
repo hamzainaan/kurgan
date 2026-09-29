@@ -253,6 +253,8 @@ void uci::loop()
             std::cout << "option name Ponder type check default false" << std::endl;
             std::cout << "option name Contempt type spin default 0 min " << search::CONTEMPT_MIN
                       << " max " << search::CONTEMPT_MAX << std::endl;
+            std::cout << "option name Move Overhead type spin default " << search::MOVE_OVERHEAD_DEFAULT
+                      << " min " << search::MOVE_OVERHEAD_MIN << " max " << search::MOVE_OVERHEAD_MAX << std::endl;
             std::cout << "option name UCI_Chess960 type check default false" << std::endl;
             std::cout << "option name Use NNUE type check default true" << std::endl;
             std::cout << "option name Search Stats type check default false" << std::endl;
@@ -322,6 +324,8 @@ void uci::loop()
                     search::setMultiPV(std::stoi(value));
                 else if (name == "Contempt")
                     search::setContempt(std::stoi(value));
+                else if (name == "Move Overhead")
+                    search::setMoveOverhead(std::stoi(value));
                 else if (name == "Clear Hash")
                     search::clear();
                 else if (name == "Use NNUE")

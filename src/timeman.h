@@ -9,6 +9,7 @@
 namespace manager
 {
     void computeDeadline(const search::SearchLimits &limits, Color us);
+    void setMoveOverhead(int ms);
     void recordScore(int score);
     void reset();
 

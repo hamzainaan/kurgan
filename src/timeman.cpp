@@ -25,6 +25,7 @@ namespace manager
     int64_t lastScore = 0;
     bool hasLastScore = false;
     double pressure = 0.0;
+    int64_t moveOverheadMs = search::MOVE_OVERHEAD_DEFAULT;
 
     double criticality(const Position &pos, int score, int scoreDrop, int stableIterations)
     {
@@ -53,21 +54,19 @@ namespace manager
 
         if (limits.movetime > 0)
         {
-            deadlineTime = start + std::chrono::milliseconds(limits.movetime);
+            deadlineTime = start + std::chrono::milliseconds(std::max<int64_t>(1, limits.movetime - moveOverheadMs));
         }
         else if (limits.wtime > 0 || limits.btime > 0)
         {
             const int64_t myTime = us == WHITE ? limits.wtime : limits.btime;
             const int64_t myInc = us == WHITE ? limits.winc : limits.binc;
+            const int64_t available = std::max<int64_t>(1, myTime - moveOverheadMs);
 
-            baseOptimumMs = myTime / 40 + myInc / 2;
+            baseOptimumMs = available / 40 + myInc / 2;
 
             int64_t maximum = baseOptimumMs * 2;
-            if (maximum > myTime / 8)
-                maximum = myTime / 8;
-
-            if (maximum > myTime - 50)
-                maximum = myTime - 50;
+            if (maximum > available / 8)
+                maximum = available / 8;
             if (maximum < 1)
                 maximum = 1;
             if (baseOptimumMs > maximum)
@@ -81,6 +80,11 @@ namespace manager
         {
             deadlineTime = start + std::chrono::hours(24);
         }
+    }
+
+    void setMoveOverhead(int ms)
+    {
+        moveOverheadMs = ms;
     }
 
     void recordScore(int score)

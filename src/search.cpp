@@ -122,7 +122,6 @@ namespace
     thread_local Move killers[2][MAX_PLY];
     thread_local int history[COLOR_NB][SQUARE_NB][SQUARE_NB];
     thread_local int captureHistory[PIECE_NB][SQUARE_NB][PIECE_TYPE_NB];
-    thread_local Move counterMoves[COLOR_NB][SQUARE_NB][SQUARE_NB];
 
     // Continuation history
     constexpr int CONT_PLIES = 4;
@@ -135,11 +134,14 @@ namespace
     constexpr int PAWN_SCALE = 100; // percent of the pawn-history term
     constexpr size_t CONT_ENTRIES = static_cast<size_t>(CONT_PLIES) * PIECE_TO_NB * PIECE_TO_NB;
     constexpr size_t PAWN_ENTRIES = static_cast<size_t>(PAWN_HISTORY_NB) * PIECE_TO_NB;
+    constexpr size_t COUNTER_ENTRIES = static_cast<size_t>(COLOR_NB) * SQUARE_NB * SQUARE_NB;
     std::mutex historyMutex;
     std::vector<std::vector<int16_t>> contSlices; // one slice per worker slot
     std::vector<std::vector<int16_t>> pawnSlices;
+    std::vector<std::vector<Move>> counterSlices;
     thread_local int16_t *contHistory = nullptr; // this worker's slice
     thread_local int16_t *pawnHistory = nullptr;
+    thread_local Move *counterMoves = nullptr;
     thread_local int16_t *contRows[CONT_PLIES][MAX_PLY + 2];
     thread_local Piece movedPieceStack[MAX_PLY + 2];
 
@@ -371,15 +373,18 @@ namespace
         {
             contSlices.resize(slot + 1);
             pawnSlices.resize(slot + 1);
+            counterSlices.resize(slot + 1);
         }
         if (contSlices[slot].empty())
         {
             contSlices[slot].assign(CONT_ENTRIES, 0);
             pawnSlices[slot].assign(PAWN_ENTRIES, 0);
+            counterSlices[slot].assign(COUNTER_ENTRIES, Move());
         }
 
         contHistory = contSlices[slot].data();
         pawnHistory = pawnSlices[slot].data();
+        counterMoves = counterSlices[slot].data();
     }
 
     void clearHistorySlices()
@@ -389,6 +394,13 @@ namespace
             std::fill(slice.begin(), slice.end(), 0);
         for (std::vector<int16_t> &slice : pawnSlices)
             std::fill(slice.begin(), slice.end(), 0);
+        for (std::vector<Move> &slice : counterSlices)
+            std::fill(slice.begin(), slice.end(), Move());
+    }
+
+    Move &counterMoveEntry(Color c, Move prev)
+    {
+        return counterMoves[(static_cast<size_t>(c) * SQUARE_NB + prev.from()) * SQUARE_NB + moveTarget(prev)];
     }
 
     int16_t &pawnHistoryEntry(const Position &pos, Piece piece, Square to)
@@ -399,9 +411,11 @@ namespace
 
     void setContinuationRows(const Position &pos, int ply)
     {
+        movedPieceStack[ply] = moveStack[ply] == Move() ? NO_PIECE : pos.board[moveTarget(moveStack[ply])];
+
         for (int i = 0; i < CONT_PLIES; ++i)
         {
-            const int back = ply - CONT_DISTANCE[i];
+            const int back = ply + 1 - CONT_DISTANCE[i];
             const Piece piece = back < 0 ? NO_PIECE : movedPieceStack[back];
             contRows[i][ply] = piece == NO_PIECE
                                    ? nullptr
@@ -409,8 +423,6 @@ namespace
                                                    pieceToIndex(piece, moveTarget(moveStack[back]))) *
                                                   PIECE_TO_NB];
         }
-
-        movedPieceStack[ply] = moveStack[ply] == Move() ? NO_PIECE : pos.board[moveTarget(moveStack[ply])];
     }
 
     int quietHistoryScore(const Position &pos, Move m, int ply)
@@ -439,6 +451,7 @@ namespace
     constexpr int KILLER1_SCORE = 5000000;
     constexpr int KILLER2_SCORE = 4900000;
     constexpr int COUNTERMOVE_SCORE = 4800000;
+    constexpr int UNDERPROMO_SCORE = -CAPTURE_BAND;
 
     struct MovePicker
     {
@@ -475,6 +488,8 @@ namespace
                 int score;
                 if (m == ttMove)
                     score = TT_MOVE_SCORE;
+                else if (m.isPromotion() && m.promoType() != QUEEN)
+                    score = UNDERPROMO_SCORE + captureScore(pos, m);
                 else if (tactical)
                     score = CAPTURE_BAND + captureScore(pos, m);
                 else if (m == killers[0][ply])
@@ -696,7 +711,7 @@ namespace
         const Move excluded = excludedStack[ply];
 
         const Move prevMove = moveStack[ply];
-        const Move counter = prevMove == Move() ? Move() : counterMoves[us][prevMove.from()][moveTarget(prevMove)];
+        const Move counter = prevMove == Move() ? Move() : counterMoveEntry(us, prevMove);
 
         if (ply > 0 && (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos) || pos.isRepetition(ply)))
             return drawScore(pos);
@@ -739,6 +754,8 @@ namespace
 
         if (depth <= 0)
             return quiescence(pos, alpha, beta, ply);
+
+        setContinuationRows(pos, ply);
 
         const Square ksq = kingSquare(pos, us);
         const bool inCheck = ksq != SQ_NONE &&
@@ -834,7 +851,7 @@ namespace
         // Thanks to the Xiphos
         const int probcutBeta = beta + tuned::PROBCUT_MARGIN;
         if (!pvNode && !inCheck && !mateWindow && excluded == Move() && depth >= tuned::PROBCUT_DEPTH &&
-            !(ttHit && ttDepth >= depth - 3 && ttScore < probcutBeta))
+            probcutBeta < MATE_THRESHOLD && !(ttHit && ttDepth >= depth - 3 && ttScore < probcutBeta))
         {
             ++stats::current().probcutEligible;
 
@@ -873,8 +890,6 @@ namespace
 
         MoveList list;
         movegen::generate_pseudo_legal_moves(pos, list);
-
-        setContinuationRows(pos, ply);
 
         MovePicker picker;
         picker.init(pos, list, ttMove, counter, ply, false);
@@ -1072,7 +1087,7 @@ namespace
                         if (quiet)
                         {
                             if (prevMove != Move())
-                                counterMoves[us][prevMove.from()][moveTarget(prevMove)] = m;
+                                counterMoveEntry(us, prevMove) = m;
 
                             if (killers[0][ply] != m)
                             {
@@ -1168,7 +1183,7 @@ namespace
         const int originalAlpha = alpha;
 
         const Move prevMove = moveStack[ply];
-        const Move counter = prevMove == Move() ? Move() : counterMoves[us][prevMove.from()][moveTarget(prevMove)];
+        const Move counter = prevMove == Move() ? Move() : counterMoveEntry(us, prevMove);
 
         if (pos.halfmoveClock >= 100 || pos.isRepetition(ply) || isInsufficientMaterial(pos))
             return drawScore(pos);
@@ -1242,6 +1257,8 @@ namespace
                     }
                 }
             }
+            else if (bestScore > -MATE_THRESHOLD && !isTactical(pos, m))
+                continue;
 
             if (!pos.do_move(m))
                 continue;
@@ -1585,7 +1602,6 @@ void search::init()
 void search::clear()
 {
     tt::clear();
-    std::memset(counterMoves, 0, sizeof(counterMoves));
     clearHistorySlices();
     manager::reset();
 }
@@ -1793,6 +1809,11 @@ void search::setContempt(int value)
 void search::setPonder(bool enabled)
 {
     ponderSetting = enabled;
+}
+
+void search::setMoveOverhead(int ms)
+{
+    manager::setMoveOverhead(clampOption("Move Overhead", ms, MOVE_OVERHEAD_MIN, MOVE_OVERHEAD_MAX));
 }
 
 void search::ponderhit()
