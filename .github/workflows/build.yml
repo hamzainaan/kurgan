@@ -77,6 +77,7 @@ jobs:
         with:
           msystem: UCRT64
           update: true
+          cache: false
           install: make mingw-w64-ucrt-x86_64-gcc
       - run: make VERSION=1 -j"$(nproc)" MODE=release TIER=${{ matrix.tier }} CXX=x86_64-w64-mingw32-g++ CXXFLAGS=-static
       - if: matrix.verify
@@ -89,7 +90,7 @@ jobs:
           if-no-files-found: error
 
   macos:
-    runs-on: macos-latest
+    runs-on: macos-26-intel
     strategy:
       fail-fast: false
       matrix:
@@ -98,14 +99,19 @@ jobs:
             tier: baseline
             lto: ''
             arch: -arch arm64 -arch x86_64
+            verify: exec
           - target: macos-arm64
             tier: apple
             lto: -flto
             arch: -arch arm64
+            verify: lipo
     steps:
       - uses: actions/checkout@v5
       - run: make VERSION=1 -j"$(sysctl -n hw.ncpu)" MODE=release TIER=${{ matrix.tier }} LTO=${{ matrix.lto }} CXXFLAGS="${{ matrix.arch }} -mmacosx-version-min=11.0"
-      - run: printf 'bench\nquit\n' | ./kurgan | grep -q "Nodes searched"
+      - if: matrix.verify == 'exec'
+        run: printf 'bench\nquit\n' | ./kurgan | grep -q "Nodes searched"
+      - if: matrix.verify == 'lipo'
+        run: lipo -archs kurgan | grep -qw arm64
       - run: cp kurgan kurgan-${{ matrix.target }}
       - uses: actions/upload-artifact@v6
         with:
