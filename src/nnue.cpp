@@ -4,7 +4,6 @@
 #include "stats.h"
 
 #include <cstring>
-#include <vector>
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -45,9 +44,6 @@ const std::string &nnue::file() { return g_file; }
 uint32_t nnue::hash() { return 0; }
 int nnue::evaluate(const Position &) { return 0; }
 
-void nnue::track(const Position &) {}
-void nnue::update(const Position &, Piece, Square, bool) {}
-
 #else
 
 namespace
@@ -56,11 +52,12 @@ namespace
 
     struct Network
     {
+        alignas(64) int16_t ft[static_cast<size_t>(nnue::INPUT_SIZE) * nnue::HALF_DIM];
+        alignas(64) int16_t ftBias[nnue::HALF_DIM];
+        alignas(64) int16_t l2[nnue::OUTPUT_BUCKETS * 2 * nnue::HALF_DIM];
+        alignas(64) int16_t l2Bias[nnue::OUTPUT_BUCKETS];
         uint32_t hash = 0;
-        std::vector<int16_t> ft;     // [INPUT_SIZE][HALF_DIM]
-        std::vector<int16_t> ftBias; // [HALF_DIM]
-        std::vector<int16_t> l2;     // [OUTPUT_BUCKETS][2][HALF_DIM]
-        std::vector<int16_t> l2Bias; // [OUTPUT_BUCKETS]
+        bool narrowHead = false;
     };
 
     Network *g_net = nullptr;
@@ -126,60 +123,112 @@ namespace
         return ((sq >> 3) << 2) | (file > 3 ? 7 - file : file);
     }
 
-    int featureIndex(int colour, Square king, int pieceColour, int type, int square)
+#if defined(__AVX512BW__)
+    using Vec = __m512i;
+    inline Vec vload(const int16_t *p) { return _mm512_load_si512(p); }
+    inline void vstore(int16_t *p, Vec v) { _mm512_store_si512(p, v); }
+    inline Vec vadd16(Vec a, Vec b) { return _mm512_add_epi16(a, b); }
+    inline Vec vsub16(Vec a, Vec b) { return _mm512_sub_epi16(a, b); }
+    inline Vec vclamp16(Vec v)
     {
-        const Square oriented = perspectiveSquare(colour, square);
-        const int mirrored = (king & 4) ? oriented ^ 7 : oriented;
-        const int colourBase = pieceColour == colour ? 0 : nnue::COLOUR_STRIDE;
-        return kingBucket(king) * nnue::FEATURES_PER_BUCKET + colourBase + type * nnue::PIECE_STRIDE + mirrored;
+        return _mm512_min_epi16(_mm512_max_epi16(v, _mm512_setzero_si512()), _mm512_set1_epi16(nnue::QA));
     }
+    inline Vec vmul16(Vec a, Vec b) { return _mm512_mullo_epi16(a, b); }
+    inline Vec vmadd16(Vec a, Vec b) { return _mm512_madd_epi16(a, b); }
+    inline Vec vadd32(Vec a, Vec b) { return _mm512_add_epi32(a, b); }
+    inline Vec vzero() { return _mm512_setzero_si512(); }
+    inline int64_t vsum32(Vec v)
+    {
+        return _mm512_reduce_add_epi64(_mm512_add_epi64(_mm512_cvtepi32_epi64(_mm512_castsi512_si256(v)),
+                                                        _mm512_cvtepi32_epi64(_mm512_extracti64x4_epi64(v, 1))));
+    }
+#elif defined(__AVX2__)
+    using Vec = __m256i;
+    inline Vec vload(const int16_t *p) { return _mm256_load_si256(reinterpret_cast<const Vec *>(p)); }
+    inline void vstore(int16_t *p, Vec v) { _mm256_store_si256(reinterpret_cast<Vec *>(p), v); }
+    inline Vec vadd16(Vec a, Vec b) { return _mm256_add_epi16(a, b); }
+    inline Vec vsub16(Vec a, Vec b) { return _mm256_sub_epi16(a, b); }
+    inline Vec vclamp16(Vec v)
+    {
+        return _mm256_min_epi16(_mm256_max_epi16(v, _mm256_setzero_si256()), _mm256_set1_epi16(nnue::QA));
+    }
+    inline Vec vmul16(Vec a, Vec b) { return _mm256_mullo_epi16(a, b); }
+    inline Vec vmadd16(Vec a, Vec b) { return _mm256_madd_epi16(a, b); }
+    inline Vec vadd32(Vec a, Vec b) { return _mm256_add_epi32(a, b); }
+    inline Vec vzero() { return _mm256_setzero_si256(); }
+    inline int64_t vsum32(Vec v)
+    {
+        const __m256i wide = _mm256_add_epi64(_mm256_cvtepi32_epi64(_mm256_castsi256_si128(v)),
+                                              _mm256_cvtepi32_epi64(_mm256_extracti128_si256(v, 1)));
+        const __m128i sum = _mm_add_epi64(_mm256_castsi256_si128(wide), _mm256_extracti128_si256(wide, 1));
+        return _mm_cvtsi128_si64(sum) + _mm_extract_epi64(sum, 1);
+    }
+#elif defined(__SSE4_1__)
+    using Vec = __m128i;
+    inline Vec vload(const int16_t *p) { return _mm_load_si128(reinterpret_cast<const Vec *>(p)); }
+    inline void vstore(int16_t *p, Vec v) { _mm_store_si128(reinterpret_cast<Vec *>(p), v); }
+    inline Vec vadd16(Vec a, Vec b) { return _mm_add_epi16(a, b); }
+    inline Vec vsub16(Vec a, Vec b) { return _mm_sub_epi16(a, b); }
+    inline Vec vclamp16(Vec v)
+    {
+        return _mm_min_epi16(_mm_max_epi16(v, _mm_setzero_si128()), _mm_set1_epi16(nnue::QA));
+    }
+    inline Vec vmul16(Vec a, Vec b) { return _mm_mullo_epi16(a, b); }
+    inline Vec vmadd16(Vec a, Vec b) { return _mm_madd_epi16(a, b); }
+    inline Vec vadd32(Vec a, Vec b) { return _mm_add_epi32(a, b); }
+    inline Vec vzero() { return _mm_setzero_si128(); }
+    inline int64_t vsum32(Vec v)
+    {
+        const __m128i wide = _mm_add_epi64(_mm_cvtepi32_epi64(v), _mm_cvtepi32_epi64(_mm_srli_si128(v, 8)));
+        return _mm_cvtsi128_si64(wide) + _mm_extract_epi64(wide, 1);
+    }
+#endif
+
+#if defined(__AVX2__) || defined(__SSE4_1__)
+    constexpr int VEC_LANES = static_cast<int>(sizeof(Vec) / sizeof(int16_t));
+    constexpr int TILE_REGS = 8;
+    constexpr int TILE = TILE_REGS * VEC_LANES;
+    static_assert(nnue::HALF_DIM % TILE == 0);
+#endif
 
     // Halves are never clamped
-    void addRow(int16_t *acc, const Network &net, int index, bool add)
+    void applyRows(int16_t *acc, const Network &net, const int *adds, int addCount, const int *subs, int subCount)
     {
-        const int16_t *row = net.ft.data() + static_cast<size_t>(index) * nnue::HALF_DIM;
-        int i = 0;
-#if defined(__AVX2__)
-        if (add)
+#if defined(__AVX2__) || defined(__SSE4_1__)
+        for (int base = 0; base < nnue::HALF_DIM; base += TILE)
         {
-            for (; i + 16 <= nnue::HALF_DIM; i += 16)
+            Vec regs[TILE_REGS];
+            for (int k = 0; k < TILE_REGS; ++k)
+                regs[k] = vload(acc + base + k * VEC_LANES);
+            for (int n = 0; n < addCount; ++n)
             {
-                const __m256i value = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(row + i));
-                const __m256i accValue = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(acc + i));
-                _mm256_storeu_si256(reinterpret_cast<__m256i *>(acc + i), _mm256_add_epi16(accValue, value));
+                const int16_t *row = net.ft + static_cast<size_t>(adds[n]) * nnue::HALF_DIM + base;
+                for (int k = 0; k < TILE_REGS; ++k)
+                    regs[k] = vadd16(regs[k], vload(row + k * VEC_LANES));
             }
+            for (int n = 0; n < subCount; ++n)
+            {
+                const int16_t *row = net.ft + static_cast<size_t>(subs[n]) * nnue::HALF_DIM + base;
+                for (int k = 0; k < TILE_REGS; ++k)
+                    regs[k] = vsub16(regs[k], vload(row + k * VEC_LANES));
+            }
+            for (int k = 0; k < TILE_REGS; ++k)
+                vstore(acc + base + k * VEC_LANES, regs[k]);
         }
-        else
+#else
+        for (int n = 0; n < addCount; ++n)
         {
-            for (; i + 16 <= nnue::HALF_DIM; i += 16)
-            {
-                const __m256i value = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(row + i));
-                const __m256i accValue = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(acc + i));
-                _mm256_storeu_si256(reinterpret_cast<__m256i *>(acc + i), _mm256_sub_epi16(accValue, value));
-            }
+            const int16_t *row = net.ft + static_cast<size_t>(adds[n]) * nnue::HALF_DIM;
+            for (int i = 0; i < nnue::HALF_DIM; ++i)
+                acc[i] = static_cast<int16_t>(acc[i] + row[i]);
         }
-#elif defined(__SSE4_1__)
-        if (add)
+        for (int n = 0; n < subCount; ++n)
         {
-            for (; i + 8 <= nnue::HALF_DIM; i += 8)
-            {
-                const __m128i value = _mm_loadu_si128(reinterpret_cast<const __m128i *>(row + i));
-                const __m128i accValue = _mm_loadu_si128(reinterpret_cast<const __m128i *>(acc + i));
-                _mm_storeu_si128(reinterpret_cast<__m128i *>(acc + i), _mm_add_epi16(accValue, value));
-            }
-        }
-        else
-        {
-            for (; i + 8 <= nnue::HALF_DIM; i += 8)
-            {
-                const __m128i value = _mm_loadu_si128(reinterpret_cast<const __m128i *>(row + i));
-                const __m128i accValue = _mm_loadu_si128(reinterpret_cast<const __m128i *>(acc + i));
-                _mm_storeu_si128(reinterpret_cast<__m128i *>(acc + i), _mm_sub_epi16(accValue, value));
-            }
+            const int16_t *row = net.ft + static_cast<size_t>(subs[n]) * nnue::HALF_DIM;
+            for (int i = 0; i < nnue::HALF_DIM; ++i)
+                acc[i] = static_cast<int16_t>(acc[i] - row[i]);
         }
 #endif
-        for (; i < nnue::HALF_DIM; ++i)
-            acc[i] = static_cast<int16_t>(acc[i] + (add ? row[i] : -row[i]));
     }
 
     int32_t squareOf(int32_t value)
@@ -189,7 +238,7 @@ namespace
     }
 
 #if defined(__AVX2__)
-    int64_t headScore(const int16_t *acc0, const int16_t *acc1, const int16_t *row)
+    int64_t headWide(const int16_t *acc0, const int16_t *acc1, const int16_t *row)
     {
         const __m256i zero = _mm256_setzero_si256();
         const __m256i high = _mm256_set1_epi32(nnue::QA);
@@ -224,7 +273,7 @@ namespace
         return total;
     }
 #elif defined(__SSE4_1__)
-    int64_t headScore(const int16_t *acc0, const int16_t *acc1, const int16_t *row)
+    int64_t headWide(const int16_t *acc0, const int16_t *acc1, const int16_t *row)
     {
         const __m128i zero = _mm_setzero_si128();
         const __m128i high = _mm_set1_epi32(nnue::QA);
@@ -259,7 +308,7 @@ namespace
         return total;
     }
 #else
-    int64_t headScore(const int16_t *acc0, const int16_t *acc1, const int16_t *row)
+    int64_t headWide(const int16_t *acc0, const int16_t *acc1, const int16_t *row)
     {
         int64_t total = 0;
         for (int i = 0; i < nnue::HALF_DIM; ++i)
@@ -269,149 +318,90 @@ namespace
     }
 #endif
 
-    // One half per colour
-    constexpr int TRACK_LIMIT = 4096; // piece changes before a rebuild
-
-    struct Tracker
+#if defined(__AVX2__) || defined(__SSE4_1__)
+    int64_t headNarrow(const int16_t *acc0, const int16_t *acc1, const int16_t *row)
     {
-        const Position *owner = nullptr;
-        uint32_t generation = 0;
-        int updates = 0;
-        uint8_t dirty = 0; // rebuild the whole half
-        bool valid = false;
-        int16_t values[COLOR_NB][nnue::HALF_DIM];
-    };
+        Vec sum = vzero();
+        for (int i = 0; i < nnue::HALF_DIM; i += VEC_LANES)
+        {
+            const Vec value0 = vclamp16(vload(acc0 + i));
+            const Vec value1 = vclamp16(vload(acc1 + i));
+            sum = vadd32(sum, vmadd16(vmul16(value0, vload(row + i)), value0));
+            sum = vadd32(sum, vmadd16(vmul16(value1, vload(row + nnue::HALF_DIM + i)), value1));
+        }
+        return vsum32(sum);
+    }
+#endif
 
-    thread_local Tracker g_tracker;
+    int64_t headScore([[maybe_unused]] const Network &net, const int16_t *acc0, const int16_t *acc1, const int16_t *row)
+    {
+#if defined(__AVX2__) || defined(__SSE4_1__)
+        if (net.narrowHead)
+            return headNarrow(acc0, acc1, row);
+#endif
+        return headWide(acc0, acc1, row);
+    }
 
-    // A king move makes the whole half stale but the piece list is nearly always close to the last
-    // state seen on that king square, so a refill diffs the cached list instead of re-adding every
-    // piece and only a different network invalidates an entry.
     struct HalfCache
     {
-        bool valid = false;
+        alignas(64) int16_t values[nnue::HALF_DIM];
+        Bitboard byPiece[PIECE_NB] = {};
         uint32_t generation = 0;
-        uint8_t count = 0;
-        Piece pieces[32] = {};
-        Square squares[32] = {};
-        int16_t values[nnue::HALF_DIM];
     };
 
     thread_local HalfCache g_halfCache[COLOR_NB][64];
+    thread_local Square g_lastKing[COLOR_NB] = {SQ_NONE, SQ_NONE};
 
-    void rebuildHalf(const Position &pos, const Network &net, int colour)
-    {
-        ++stats::current().evalRebuilds;
-
-        Tracker &t = g_tracker;
-        const Square king = perspectiveKing(pos, colour);
-        int16_t *acc = t.values[colour];
-
-        for (int i = 0; i < nnue::HALF_DIM; ++i)
-            acc[i] = net.ftBias[i];
-
-        for (int pt = PAWN; pt <= KING; ++pt)
-        {
-            for (int pieceColour = WHITE; pieceColour <= BLACK; ++pieceColour)
-            {
-                Bitboard b = pos.byColor[pieceColour] & pos.byType[pt];
-                while (b)
-                {
-                    const int sq = bitScan(b);
-                    b &= b - 1;
-                    addRow(acc, net, featureIndex(colour, king, pieceColour, pt, sq), true);
-                }
-            }
-        }
-    }
-
-    void writeCacheList(HalfCache &cache, const Position &pos)
-    {
-        cache.valid = true;
-        cache.generation = g_generation;
-        cache.count = 0;
-        for (int pt = PAWN; pt <= KING; ++pt)
-        {
-            for (int pieceColour = WHITE; pieceColour <= BLACK; ++pieceColour)
-            {
-                Bitboard b = pos.byColor[pieceColour] & pos.byType[pt];
-                while (b)
-                {
-                    const int sq = bitScan(b);
-                    b &= b - 1;
-                    cache.pieces[cache.count] = makePiece(static_cast<Color>(pieceColour),
-                                                          static_cast<PieceType>(pt));
-                    cache.squares[cache.count] = static_cast<Square>(sq);
-                    ++cache.count;
-                }
-            }
-        }
-    }
-
-    void refreshHalf(const Position &pos, const Network &net, int colour)
+    const int16_t *refreshHalf(const Position &pos, const Network &net, int colour)
     {
         const Square king = perspectiveKing(pos, colour);
         HalfCache &cache = g_halfCache[colour][king];
-        int16_t *acc = g_tracker.values[colour];
+        stats::Tally &tally = stats::current();
 
-        if (!cache.valid || cache.generation != g_generation)
+        if (cache.generation != g_generation)
         {
-            rebuildHalf(pos, net, colour);
-            writeCacheList(cache, pos);
-            std::memcpy(cache.values, acc, sizeof(cache.values));
-            return;
+            ++tally.evalRebuilds;
+            std::memcpy(cache.values, net.ftBias, sizeof(cache.values));
+            std::memset(cache.byPiece, 0, sizeof(cache.byPiece));
+            cache.generation = g_generation;
+        }
+        else if (g_lastKing[colour] != king)
+            ++tally.evalRefills;
+        g_lastKing[colour] = king;
+
+        const int base = kingBucket(king) * nnue::FEATURES_PER_BUCKET;
+        const int flip = (colour == BLACK ? 56 : 0) ^ ((king & 4) ? 7 : 0);
+        int adds[64];
+        int subs[64];
+        int addCount = 0;
+        int subCount = 0;
+
+        for (int pieceColour = WHITE; pieceColour <= BLACK; ++pieceColour)
+        {
+            const int colourBase = base + (pieceColour == colour ? 0 : nnue::COLOUR_STRIDE);
+            for (int pt = PAWN; pt <= KING; ++pt)
+            {
+                const Piece pc = makePiece(static_cast<Color>(pieceColour), static_cast<PieceType>(pt));
+                const Bitboard now = pos.byPiece[pc];
+                const Bitboard changed = cache.byPiece[pc] ^ now;
+                if (!changed)
+                    continue;
+                cache.byPiece[pc] = now;
+
+                const int offset = colourBase + pt * nnue::PIECE_STRIDE;
+                for (Bitboard b = changed & now; b; b &= b - 1)
+                    adds[addCount++] = offset + (bitScan(b) ^ flip);
+                for (Bitboard b = changed & ~now; b; b &= b - 1)
+                    subs[subCount++] = offset + (bitScan(b) ^ flip);
+            }
         }
 
-        ++stats::current().evalRefills;
-
-        Bitboard covered = 0;
-        for (int i = 0; i < cache.count; ++i)
+        if (addCount + subCount)
         {
-            const Square sq = cache.squares[i];
-            const Piece pc = cache.pieces[i];
-            if (pos.board[sq] == pc)
-                covered |= 1ULL << static_cast<int>(sq);
-            else
-                addRow(cache.values, net, featureIndex(colour, king, colorOf(pc), typeOf(pc), sq), false);
+            applyRows(cache.values, net, adds, addCount, subs, subCount);
+            tally.evalUpdates += static_cast<uint64_t>(addCount + subCount);
         }
-
-        Bitboard added = (pos.byColor[WHITE] | pos.byColor[BLACK]) & ~covered;
-        while (added)
-        {
-            const int sq = bitScan(added);
-            added &= added - 1;
-            const Piece pc = pos.board[sq];
-            addRow(cache.values, net, featureIndex(colour, king, colorOf(pc), typeOf(pc), sq), true);
-        }
-
-        std::memcpy(acc, cache.values, sizeof(cache.values));
-        writeCacheList(cache, pos);
-    }
-
-    // Accumulator matching 'pos', refreshed or rebuilt as far as it is out of date.
-    void tracked(const Position &pos, const Network &net)
-    {
-        Tracker &t = g_tracker;
-        if (t.owner != &pos || t.generation != g_generation || !t.valid)
-        {
-            t.owner = &pos;
-            t.generation = g_generation;
-            t.updates = 0;
-            t.dirty = 0;
-            t.valid = true;
-            for (int c = 0; c < COLOR_NB; ++c)
-                refreshHalf(pos, net, c);
-            return;
-        }
-
-        for (int c = 0; c < COLOR_NB; ++c)
-        {
-            const uint8_t bit = static_cast<uint8_t>(1 << c);
-            if ((t.dirty & bit) == 0)
-                continue;
-            t.dirty &= static_cast<uint8_t>(~bit);
-            refreshHalf(pos, net, c);
-        }
+        return cache.values;
     }
 
     int outputBucket(const Position &pos)
@@ -447,25 +437,27 @@ bool nnue::loadFromMemory(const uint8_t *data, size_t size, const std::string &n
         return false;
     }
 
-    Network net;
-
-    // Copy each block straight from the mapped payload.
-    const int16_t *words = reinterpret_cast<const int16_t *>(data);
+    Network *net = new Network;
     size_t at = 0;
-    const auto take = [&](std::vector<int16_t> &dst, size_t count)
+    const auto take = [&](int16_t *dst, size_t count)
     {
-        dst.assign(words + at, words + at + count);
-        at += count;
+        std::memcpy(dst, data + at, count * sizeof(int16_t));
+        at += count * sizeof(int16_t);
     };
-    take(net.ft, static_cast<size_t>(INPUT_SIZE) * HALF_DIM);
-    take(net.ftBias, HALF_DIM);
-    take(net.l2, static_cast<size_t>(OUTPUT_BUCKETS) * 2 * HALF_DIM);
-    take(net.l2Bias, OUTPUT_BUCKETS);
+    take(net->ft, static_cast<size_t>(INPUT_SIZE) * HALF_DIM);
+    take(net->ftBias, HALF_DIM);
+    take(net->l2, static_cast<size_t>(OUTPUT_BUCKETS) * 2 * HALF_DIM);
+    take(net->l2Bias, OUTPUT_BUCKETS);
 
-    net.hash = fnv1a(data, size);
-    g_net = new Network(std::move(net));
+    net->narrowHead = true;
+    for (const int16_t w : net->l2)
+        if (w < -128 || w > 128)
+            net->narrowHead = false;
+
+    net->hash = fnv1a(data, size);
+    g_net = net;
     g_file = name;
-    g_hash = net.hash;
+    g_hash = net->hash;
     g_error.clear();
     return true;
 }
@@ -507,60 +499,15 @@ const std::string &nnue::file() { return g_file; }
 
 uint32_t nnue::hash() { return g_hash; }
 
-void nnue::track(const Position &pos)
-{
-    Tracker &t = g_tracker;
-    t.owner = &pos;
-    t.generation = g_generation;
-    t.updates = 0;
-    t.dirty = 0;
-    t.valid = active();
-    if (!t.valid)
-        return;
-
-    for (int c = 0; c < COLOR_NB; ++c)
-        refreshHalf(pos, *g_net, c);
-}
-
-void nnue::update(const Position &pos, Piece piece, Square square, bool add)
-{
-    Tracker &t = g_tracker;
-    if (piece == NO_PIECE || t.owner != &pos || !t.valid || !active())
-        return;
-    if (++t.updates > TRACK_LIMIT)
-    {
-        t.valid = false; // far from the last rebuild: start over on the next eval
-        return;
-    }
-
-    const int pieceColour = colorOf(piece);
-    const int type = typeOf(piece);
-    if (type == KING)
-        t.dirty |= static_cast<uint8_t>(1 << pieceColour); // it indexes its own perspective
-
-    const Network &net = *g_net;
-    int applied = 0;
-    for (int c = 0; c < COLOR_NB; ++c)
-    {
-        if (t.dirty & (1 << c))
-            continue; // the pending rebuild covers this half
-        addRow(t.values[c], net, featureIndex(c, perspectiveKing(pos, c), pieceColour, type, square), add);
-        ++applied;
-    }
-
-    stats::current().evalUpdates += static_cast<uint64_t>(applied);
-}
-
 int nnue::evaluate(const Position &pos)
 {
     const Network &net = *g_net;
-    tracked(pos, net);
+    const int16_t *us = refreshHalf(pos, net, pos.sideToMove);
+    const int16_t *them = refreshHalf(pos, net, pos.sideToMove ^ 1);
 
     const int bucket = outputBucket(pos);
-    const int16_t *head = net.l2.data() + static_cast<size_t>(bucket) * 2 * HALF_DIM;
-    const int64_t raw = headScore(g_tracker.values[pos.sideToMove],
-                                  g_tracker.values[pos.sideToMove ^ 1], head)
-        + static_cast<int64_t>(QA) * net.l2Bias[bucket];
+    const int16_t *head = net.l2 + static_cast<size_t>(bucket) * 2 * HALF_DIM;
+    const int64_t raw = headScore(net, us, them, head) + static_cast<int64_t>(QA) * net.l2Bias[bucket];
 
     return static_cast<int>(roundDiv(static_cast<int64_t>(EVAL_SCALE) * raw, HEAD_DIVISOR));
 }

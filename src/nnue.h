@@ -66,10 +66,4 @@ namespace nnue
 
     // Network evaluation in engine centipawns from the side to move.
     int evaluate(const Position &pos);
-
-    // Incremental accumulator. A position binds itself with track() once its
-    // board is set up and reports every piece change with update(); the values
-    // are rebuilt lazily, the first time the position is actually evaluated.
-    void track(const Position &pos);
-    void update(const Position &pos, Piece piece, Square square, bool add);
 }

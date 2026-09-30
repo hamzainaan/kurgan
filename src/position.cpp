@@ -1,6 +1,5 @@
 #include "position.h"
 #include "movegen.h"
-#include "nnue.h"
 
 #include <algorithm>
 #include <iostream>
@@ -241,7 +240,6 @@ void Position::putPiece(Piece piece, Square square)
     zobristKey ^= pieceKeys[piece][square];
     if (typeOf(piece) == PAWN)
         pawnKey ^= pieceKeys[piece][square];
-    nnue::update(*this, piece, square, true);
 }
 
 void Position::removePiece(Square square)
@@ -257,7 +255,6 @@ void Position::removePiece(Square square)
     zobristKey ^= pieceKeys[piece][square];
     if (typeOf(piece) == PAWN)
         pawnKey ^= pieceKeys[piece][square];
-    nnue::update(*this, piece, square, false);
 }
 
 bool Position::do_move(Move move)
@@ -510,7 +507,6 @@ bool Position::set_fen(const std::string &fen)
 
     initZobrist();
     clear();
-    nnue::track(*this);
 
     // 1. Piece placement, ranks 8 down to 1.
     int rank = RANK_8;
