@@ -181,6 +181,8 @@ namespace
                 ss >> limits.winc;
             else if (token == "binc")
                 ss >> limits.binc;
+            else if (token == "movestogo")
+                ss >> limits.movestogo;
             else if (token == "nodes")
                 ss >> limits.nodes;
             else if (token == "mate")

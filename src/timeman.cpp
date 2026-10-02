@@ -40,6 +40,9 @@ namespace manager
     constexpr double CEILING_SCALE = 1.75;
     constexpr double SINGLE_REPLY_SCALE = 0.10;
 
+    constexpr int64_t HORIZON_MOVES = 40;
+    constexpr int64_t MAX_CAP_MOVES = 6;
+
     std::atomic<Clock::rep> startRep{0};
     std::atomic<Clock::rep> deadlineRep{0};
     std::atomic<int64_t> baseOptimumMs{0};
@@ -169,12 +172,14 @@ namespace manager
             const int64_t myTime = us == WHITE ? limits.wtime : limits.btime;
             const int64_t myInc = us == WHITE ? limits.winc : limits.binc;
             const int64_t available = std::max<int64_t>(1, myTime - moveOverheadMs);
+            const int64_t horizon = limits.movestogo > 0 ? std::min<int64_t>(limits.movestogo, HORIZON_MOVES) : HORIZON_MOVES;
 
-            int64_t optimum = available / 40 + myInc / 2;
+            int64_t optimum = available / horizon + myInc / 2;
 
             int64_t maximum = optimum * 2;
-            if (maximum > available / 8)
-                maximum = available / 8;
+            const int64_t maximumCap = available * 3 / (4 * std::min(horizon, MAX_CAP_MOVES));
+            if (maximum > maximumCap)
+                maximum = maximumCap;
             if (maximum < 1)
                 maximum = 1;
 

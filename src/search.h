@@ -17,6 +17,7 @@ namespace search
         int winc = 0;     // ms increment for white
         int binc = 0;     // ms increment for black
         int movetime = 0; // fixed time per move
+        int movestogo = 0; // moves until the next time control (0 = sudden death)
         int depth = 0;    // fixed depth (0 = unlimited)
         int nodes = 0;    // total node limit
         int mate = 0;     // search for a mate within this many moves
