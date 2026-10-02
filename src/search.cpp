@@ -454,7 +454,6 @@ namespace
     constexpr int KILLER1_SCORE = 5000000;
     constexpr int KILLER2_SCORE = 4900000;
     constexpr int COUNTERMOVE_SCORE = 4800000;
-    constexpr int UNDERPROMO_SCORE = -CAPTURE_BAND;
 
     struct MovePicker
     {
@@ -492,7 +491,7 @@ namespace
                 if (m == ttMove)
                     score = TT_MOVE_SCORE;
                 else if (m.isPromotion() && m.promoType() != QUEEN)
-                    score = UNDERPROMO_SCORE + captureScore(pos, m);
+                    score = h;
                 else if (tactical)
                     score = CAPTURE_BAND + captureScore(pos, m);
                 else if (m == killers[0][ply])
