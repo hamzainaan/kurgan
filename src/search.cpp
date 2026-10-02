@@ -1599,6 +1599,8 @@ namespace
     {
         workerId = id;
         iterativeDeepening(*pos);
+        if (id == 0)
+            stopFlag.store(true, std::memory_order_relaxed);
     }
 }
 
