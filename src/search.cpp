@@ -154,6 +154,10 @@ namespace
     thread_local int rootDepth = 0;
     int lmrTable[MAX_DEPTH][64];
 
+    constexpr int SKIP_PATTERNS = 20;
+    constexpr int SKIP_SIZE[SKIP_PATTERNS] = {1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4};
+    constexpr int SKIP_PHASE[SKIP_PATTERNS] = {0, 1, 0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6, 7};
+
     void initReductions()
     {
         for (int d = 1; d < MAX_DEPTH; ++d)
@@ -1481,6 +1485,13 @@ namespace
 
         for (int depth = 1; depth <= maxDepth; ++depth)
         {
+            if (!isMain && depth > 1 && depth < maxDepth)
+            {
+                const int pattern = (workerId - 1) % SKIP_PATTERNS;
+                if (((depth + SKIP_PHASE[pattern]) / SKIP_SIZE[pattern]) % 2 != 0)
+                    continue;
+            }
+
             const int mpvCount = isMain ? multiPVSetting : 1;
             const int64_t iterationStart = manager::elapsedMs();
             excludedRootMoves.clear();
