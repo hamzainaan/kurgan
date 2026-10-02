@@ -17,7 +17,9 @@ namespace manager
     void reset();
 
     bool budgeted();
-    int64_t optimumMs(const Position &pos, int score, int scoreDrop, int stableIterations);
+    int64_t elapsedMs();
+    void rootFailing(bool failing);
+    bool shouldStop(const Position &pos, int score, int scoreDrop, int stableIterations, int64_t lastIterationMs);
 
     std::chrono::steady_clock::time_point deadline();
     void postpone();

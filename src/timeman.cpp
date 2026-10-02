@@ -31,17 +31,28 @@ namespace manager
     constexpr double TACTICAL_SWING_W = 0.35;
     constexpr double TACTICAL_INSTABILITY_W = 0.25;
     constexpr double TACTICAL_DECIDED_W = 0.30;
-    constexpr double EXTEND_THRESHOLD = 0.45;
+    constexpr double EXTEND_THRESHOLD = 0.35;
     constexpr double EXTEND_MIN = 0.15;
     constexpr double EXTEND_MAX = 0.50;
+    constexpr double EXTEND_MAX_LOW = 0.80;
     constexpr int MAX_EXTENSIONS = 3;
     constexpr int64_t MIN_EXTENSION_MS = 5;
     constexpr int64_t CEILING_DIV = 5;
     constexpr double CEILING_SCALE = 1.75;
+    constexpr double CEILING_SCALE_LOW = 2.50;
+    constexpr double LOW_CLOCK_OPTIMUM_MS = 3000.0;
     constexpr double SINGLE_REPLY_SCALE = 0.10;
 
     constexpr int64_t HORIZON_MOVES = 40;
     constexpr int64_t MAX_CAP_MOVES = 6;
+    constexpr int EASY_ITERATIONS = 3;
+    constexpr int EASY_SWING = 12;
+    constexpr double EASY_SCALE = 0.65;
+    constexpr int UNSTABLE_ITERATIONS = 2;
+    constexpr double UNSTABLE_SCALE = 1.30;
+    constexpr double FALLING_SCALE = 60.0;
+    constexpr double FALLING_W = 0.60;
+    constexpr double ITERATION_GROWTH = 1.2;
 
     std::atomic<Clock::rep> startRep{0};
     std::atomic<Clock::rep> deadlineRep{0};
@@ -49,6 +60,8 @@ namespace manager
     std::atomic<int64_t> maximumMs{0};
     std::atomic<int64_t> ceilingMs{0};
     std::atomic<int> extensionsUsed{0};
+    std::atomic<double> extendMax{EXTEND_MAX};
+    std::atomic<bool> failingLow{false};
 
     int64_t lastScore = 0;
     bool hasLastScore = false;
@@ -162,6 +175,8 @@ namespace manager
         baseOptimumMs.store(0, std::memory_order_relaxed);
         maximumMs.store(0, std::memory_order_relaxed);
         ceilingMs.store(0, std::memory_order_relaxed);
+        extendMax.store(EXTEND_MAX, std::memory_order_relaxed);
+        failingLow.store(false, std::memory_order_relaxed);
 
         if (limits.movetime > 0)
         {
@@ -176,6 +191,9 @@ namespace manager
 
             int64_t optimum = available / horizon + myInc / 2;
 
+            const double lowClock = std::clamp(1.0 - static_cast<double>(optimum) / LOW_CLOCK_OPTIMUM_MS, 0.0, 1.0);
+            extendMax.store(lerp(EXTEND_MAX, EXTEND_MAX_LOW, lowClock), std::memory_order_relaxed);
+
             int64_t maximum = optimum * 2;
             const int64_t maximumCap = available * 3 / (4 * std::min(horizon, MAX_CAP_MOVES));
             if (maximum > maximumCap)
@@ -183,7 +201,8 @@ namespace manager
             if (maximum < 1)
                 maximum = 1;
 
-            int64_t ceiling = std::min(available / CEILING_DIV, static_cast<int64_t>(static_cast<double>(maximum) * CEILING_SCALE));
+            const double ceilingScale = lerp(CEILING_SCALE, CEILING_SCALE_LOW, lowClock);
+            int64_t ceiling = std::min(available / CEILING_DIV, static_cast<int64_t>(static_cast<double>(maximum) * ceilingScale));
 
             if (singleReply)
             {
@@ -221,22 +240,27 @@ namespace manager
         observedStable = stableIterations;
     }
 
+    bool extensible(double tactical)
+    {
+        return !singleReply && baseOptimumMs.load(std::memory_order_relaxed) > 0
+               && extensionsUsed.load(std::memory_order_relaxed) < MAX_EXTENSIONS
+               && (tactical >= EXTEND_THRESHOLD || failingLow.load(std::memory_order_relaxed));
+    }
+
     bool extend()
     {
-        if (singleReply || baseOptimumMs.load(std::memory_order_relaxed) <= 0
-            || extensionsUsed.load(std::memory_order_relaxed) >= MAX_EXTENSIONS)
-            return false;
-
         const double tactical = tacticality();
-        if (tactical < EXTEND_THRESHOLD)
+        if (!extensible(tactical))
             return false;
 
         const auto now = Clock::now();
-        const Clock::time_point start{Clock::duration{startRep.load(std::memory_order_relaxed)}};
-        const int64_t used = std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
+        const int64_t used = elapsedMs();
         const int64_t room = ceilingMs.load(std::memory_order_relaxed) - used;
 
-        const double share = lerp(EXTEND_MIN, EXTEND_MAX, (tactical - EXTEND_THRESHOLD) / (1.0 - EXTEND_THRESHOLD));
+        const double ceilingShare = extendMax.load(std::memory_order_relaxed);
+        const double share = failingLow.load(std::memory_order_relaxed)
+                                 ? ceilingShare
+                                 : lerp(EXTEND_MIN, ceilingShare, (tactical - EXTEND_THRESHOLD) / (1.0 - EXTEND_THRESHOLD));
         const int64_t step = std::min(room, static_cast<int64_t>(static_cast<double>(maximumMs.load(std::memory_order_relaxed)) * share));
         if (step < MIN_EXTENSION_MS)
             return false;
@@ -273,10 +297,47 @@ namespace manager
         return baseOptimumMs.load(std::memory_order_relaxed) > 0;
     }
 
-    int64_t optimumMs(const Position &pos, int score, int scoreDrop, int stableIterations)
+    int64_t elapsedMs()
     {
+        const Clock::time_point start{Clock::duration{startRep.load(std::memory_order_relaxed)}};
+        return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count();
+    }
+
+    void rootFailing(bool failing)
+    {
+        failingLow.store(failing, std::memory_order_relaxed);
+    }
+
+    bool shouldStop(const Position &pos, int score, int scoreDrop, int stableIterations, int64_t lastIterationMs)
+    {
+        const int swing = scoreDrop < 0 ? -scoreDrop : scoreDrop;
+
+        double factor = 1.0;
+        if (stableIterations >= EASY_ITERATIONS && swing <= EASY_SWING)
+            factor = EASY_SCALE;
+        else
+        {
+            if (stableIterations < UNSTABLE_ITERATIONS)
+                factor *= UNSTABLE_SCALE;
+            if (scoreDrop > 0)
+                factor *= 1.0 + FALLING_W * std::min(1.0, scoreDrop / FALLING_SCALE);
+        }
+
         const double scale = lerp(TIME_SCALE_MIN, TIME_SCALE_MAX, criticality(pos, score, scoreDrop, stableIterations));
-        return static_cast<int64_t>(static_cast<double>(baseOptimumMs.load(std::memory_order_relaxed)) * scale);
+        const int64_t maximum = maximumMs.load(std::memory_order_relaxed);
+        const int64_t soft = std::min(maximum, static_cast<int64_t>(static_cast<double>(baseOptimumMs.load(std::memory_order_relaxed)) * scale * factor));
+
+        const int64_t elapsed = elapsedMs();
+        if (elapsed >= soft)
+            return true;
+
+        const Clock::time_point start{Clock::duration{startRep.load(std::memory_order_relaxed)}};
+        int64_t reach = std::chrono::duration_cast<std::chrono::milliseconds>(deadline() - start).count();
+        if (extensible(tacticality()))
+            reach = std::max(reach, ceilingMs.load(std::memory_order_relaxed));
+
+        return static_cast<double>(elapsed) + ITERATION_GROWTH * static_cast<double>(std::max<int64_t>(0, lastIterationMs))
+               > static_cast<double>(reach);
     }
 
     std::chrono::steady_clock::time_point deadline()

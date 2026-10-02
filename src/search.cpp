@@ -1321,6 +1321,8 @@ namespace
             beta = std::min(INF, prevScore + delta);
         }
 
+        const bool isMain = workerId == 0 && currentMultiPV == 1;
+
         while (true)
         {
             const int score = alphaBeta(pos, depth, alpha, beta, 0, true, false);
@@ -1331,7 +1333,13 @@ namespace
             if (score <= alpha)
             {
                 if (alpha <= -INF)
+                {
+                    if (isMain)
+                        manager::rootFailing(false);
                     return score;
+                }
+                if (isMain)
+                    manager::rootFailing(true);
                 // Fail-low: lower alpha and tighten beta toward the true value.
                 beta = (alpha + beta) / 2;
                 alpha = (score <= -MATE_THRESHOLD) ? -INF : std::max(-INF, score - delta);
@@ -1342,6 +1350,8 @@ namespace
             }
             else
             {
+                if (isMain)
+                    manager::rootFailing(false);
                 return score;
             }
 
@@ -1473,6 +1483,7 @@ namespace
         for (int depth = 1; depth <= maxDepth; ++depth)
         {
             const int mpvCount = isMain ? multiPVSetting : 1;
+            const int64_t iterationStart = manager::elapsedMs();
             excludedRootMoves.clear();
 
             for (int mpv = 1; mpv <= mpvCount; ++mpv)
@@ -1552,12 +1563,9 @@ namespace
 
                 manager::observe(previousScore, scoreDrop, stableIterations);
 
-                const int64_t elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                            std::chrono::steady_clock::now() - start)
-                                            .count();
-
-                if (manager::budgeted() && stableIterations >= 3 && scoreDrop <= 0
-                    && elapsed >= manager::optimumMs(pos, previousScore, scoreDrop, stableIterations))
+                if (manager::budgeted()
+                    && manager::shouldStop(pos, previousScore, scoreDrop, stableIterations,
+                                           manager::elapsedMs() - iterationStart))
                     stopFlag.store(true, std::memory_order_relaxed);
             }
 
