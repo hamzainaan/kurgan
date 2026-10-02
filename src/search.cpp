@@ -152,6 +152,8 @@ namespace
     thread_local Move excludedStack[MAX_PLY + 2];
     thread_local int doubleExtensions[MAX_PLY + 2];
     thread_local int rootDepth = 0;
+    thread_local Move partialBest;
+    thread_local Move partialPonder;
     int lmrTable[MAX_DEPTH][64];
 
     constexpr int SKIP_PATTERNS = 20;
@@ -1324,11 +1326,19 @@ namespace
             beta = std::min(INF, prevScore + delta);
         }
 
+        partialBest = Move();
+        partialPonder = Move();
         const bool isMain = workerId == 0 && currentMultiPV == 1;
 
         while (true)
         {
             const int score = alphaBeta(pos, depth, alpha, beta, 0, true, false);
+
+            if (pvLength[0] > 0)
+            {
+                partialBest = pvTable[0][0];
+                partialPonder = pvLength[0] > 1 ? pvTable[0][1] : Move();
+            }
 
             if (stopFlag.load(std::memory_order_relaxed))
                 return score;
@@ -1506,7 +1516,15 @@ namespace
                                       : alphaBeta(pos, depth, -INF, INF, 0, true, false);
 
                 if (stopFlag.load(std::memory_order_relaxed))
+                {
+                    if (isMain && mpv == 1 && partialBest != Move())
+                    {
+                        std::lock_guard<std::mutex> lock(bestMutex);
+                        finalBestMove = partialBest;
+                        finalPonderMove = partialPonder;
+                    }
                     break;
+                }
 
                 if (mpv == 1)
                 {
