@@ -1153,7 +1153,7 @@ namespace
             else
                 bound = BOUND_EXACT;
 
-            tt::store(key, bestMove, bestScore, depth, bound, ply, staticEval);
+            tt::store(key, bound == BOUND_UPPER ? Move() : bestMove, bestScore, depth, bound, ply, staticEval);
         }
 
         return bestScore;
