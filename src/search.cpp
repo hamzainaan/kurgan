@@ -1569,7 +1569,6 @@ namespace
             manager::recordScore(lastCompletedScore);
 
         globalNodes.fetch_add(nodes, std::memory_order_relaxed);
-        tt::flushFilled();
 
         stats::Tally &tally = stats::current();
         tally.nodes = nodes;

@@ -60,5 +60,4 @@ namespace tt
     void store(uint64_t key, Move move, int score, int depth, int bound, int ply, int eval = NO_EVAL);
 
     int hashfull();
-    void flushFilled();
 }
