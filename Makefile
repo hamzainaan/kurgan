@@ -124,7 +124,8 @@ else
     ARCHFLAGS := -march=native
   else ifeq ($(TIER),baseline)
     ARCHFLAGS :=
-  else ifeq ($(TIER),sse42)    ARCHFLAGS := -march=x86-64-v2
+  else ifeq ($(TIER),sse42)
+    ARCHFLAGS := -march=x86-64-v2
   else ifeq ($(TIER),avx2)
     ARCHFLAGS := -march=x86-64-v3
   else ifeq ($(TIER),avx512)
