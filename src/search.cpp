@@ -1,5 +1,6 @@
 #include "search.h"
 
+#include "endgame.h"
 #include "evaluate.h"
 #include "see.h"
 #include "stats.h"
@@ -1637,6 +1638,7 @@ int search::clampOption(const char *name, int value, int minValue, int maxValue)
 void search::init()
 {
     movegen::init();
+    endgame::init();
     initReductions();
     tt::resize(static_cast<size_t>(hashSizeMb));
 }
@@ -1696,6 +1698,7 @@ void search::go(const Position &root, const SearchLimits &limits)
     if (!tt::allocated())
     {
         movegen::init();
+        endgame::init();
         tt::resize(static_cast<size_t>(hashSizeMb));
     }
 

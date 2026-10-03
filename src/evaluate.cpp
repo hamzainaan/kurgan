@@ -1,5 +1,6 @@
 #include "evaluate.h"
 
+#include "endgame.h"
 #include "nnue.h"
 
 #ifndef KURGAN_HCE_OFF
@@ -922,13 +923,12 @@ int evaluate::evaluate(const Position &pos)
 
 #ifdef KURGAN_NNUE
     if (nnue::active())
-        return nnue::evaluate(pos);
+        return endgame::adjust(pos, nnue::evaluate(pos));
 #endif
 #ifdef KURGAN_HCE_OFF
-    (void) pos;
-    return 0;
+    return endgame::adjust(pos, 0);
 #else
-    return hce(pos);
+    return endgame::adjust(pos, hce(pos));
 #endif
 }
 

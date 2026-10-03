@@ -53,6 +53,10 @@ namespace manager
     constexpr double FALLING_SCALE = 60.0;
     constexpr double FALLING_W = 0.60;
     constexpr double ITERATION_GROWTH = 1.2;
+    constexpr double LONG_CLOCK_FROM_MS = 10000.0;
+    constexpr double LONG_CLOCK_TO_MS = 30000.0;
+    constexpr double EASY_SCALE_LONG = 0.90;
+    constexpr double TIME_SCALE_MIN_LONG = 0.85;
 
     std::atomic<Clock::rep> startRep{0};
     std::atomic<Clock::rep> deadlineRep{0};
@@ -62,6 +66,7 @@ namespace manager
     std::atomic<int> extensionsUsed{0};
     std::atomic<double> extendMax{EXTEND_MAX};
     std::atomic<bool> failingLow{false};
+    std::atomic<double> longClock{0.0};
 
     int64_t lastScore = 0;
     bool hasLastScore = false;
@@ -177,6 +182,7 @@ namespace manager
         ceilingMs.store(0, std::memory_order_relaxed);
         extendMax.store(EXTEND_MAX, std::memory_order_relaxed);
         failingLow.store(false, std::memory_order_relaxed);
+        longClock.store(0.0, std::memory_order_relaxed);
 
         if (limits.movetime > 0)
         {
@@ -193,6 +199,8 @@ namespace manager
 
             const double lowClock = std::clamp(1.0 - static_cast<double>(optimum) / LOW_CLOCK_OPTIMUM_MS, 0.0, 1.0);
             extendMax.store(lerp(EXTEND_MAX, EXTEND_MAX_LOW, lowClock), std::memory_order_relaxed);
+            longClock.store(std::clamp((static_cast<double>(optimum) - LONG_CLOCK_FROM_MS) / (LONG_CLOCK_TO_MS - LONG_CLOCK_FROM_MS), 0.0, 1.0),
+                            std::memory_order_relaxed);
 
             int64_t maximum = optimum * 2;
             const int64_t maximumCap = available * 3 / (4 * std::min(horizon, MAX_CAP_MOVES));
@@ -312,9 +320,11 @@ namespace manager
     {
         const int swing = scoreDrop < 0 ? -scoreDrop : scoreDrop;
 
+        const double longness = longClock.load(std::memory_order_relaxed);
+
         double factor = 1.0;
         if (stableIterations >= EASY_ITERATIONS && swing <= EASY_SWING)
-            factor = EASY_SCALE;
+            factor = lerp(EASY_SCALE, EASY_SCALE_LONG, longness);
         else
         {
             if (stableIterations < UNSTABLE_ITERATIONS)
@@ -323,7 +333,8 @@ namespace manager
                 factor *= 1.0 + FALLING_W * std::min(1.0, scoreDrop / FALLING_SCALE);
         }
 
-        const double scale = lerp(TIME_SCALE_MIN, TIME_SCALE_MAX, criticality(pos, score, scoreDrop, stableIterations));
+        const double scale = lerp(lerp(TIME_SCALE_MIN, TIME_SCALE_MIN_LONG, longness), TIME_SCALE_MAX,
+                                  criticality(pos, score, scoreDrop, stableIterations));
         const int64_t maximum = maximumMs.load(std::memory_order_relaxed);
         const int64_t soft = std::min(maximum, static_cast<int64_t>(static_cast<double>(baseOptimumMs.load(std::memory_order_relaxed)) * scale * factor));
 
