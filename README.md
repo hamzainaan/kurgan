@@ -26,9 +26,12 @@ Maintained in the quiet hope that it stops losing to Stockfish. It will not.
 - Alpha-beta, iterative deepening, aspiration windows.
 - Transposition table, killers, history, LMR, null move.
 - Assorted pruning: reverse futility, futility, SEE-based quiet pruning.
-- Lazy SMP, tapered evaluation.
-- Default NNUE evaluation (HCE optional): mirrored king-bucket HalfKA (6144 inputs,
-  256-wide SCReLU hidden layer, 8 output buckets), trained with Bullet.
+- Lazy SMP, tapered evaluation, king safety, pawn structure.
+- Threaded search statistics, mate PV completion.
+- Default NNUE evaluation (HCE optional): mirrored king-bucket HalfKA (24,576 inputs,
+  512-wide SCReLU hidden layer, 8 output buckets), SIMD, trained with Bullet.
+- Syzygy tablebases (WDL and DTZ); endgame knowledge (KPK bitbase, material scaling).
+- Time management with a per-move node budget; contempt.
 - Perft and a deterministic benchmark.
 - FRC960 (Fischer Random).
 
