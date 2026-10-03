@@ -60,6 +60,10 @@ namespace search
     constexpr int MOVE_OVERHEAD_MIN = 0;
     constexpr int MOVE_OVERHEAD_MAX = 5000;
     constexpr int MOVE_OVERHEAD_DEFAULT = 10;
+    constexpr int SYZYGY_DEPTH_MIN = 1;
+    constexpr int SYZYGY_DEPTH_MAX = 100;
+    constexpr int SYZYGY_LIMIT_MIN = 0;
+    constexpr int SYZYGY_LIMIT_MAX = 7;
 
     int clampOption(const char *name, int value, int minValue, int maxValue);
 
@@ -70,6 +74,10 @@ namespace search
     void setContempt(int value);
     void setPonder(bool enabled);
     void setMoveOverhead(int ms);
+    void setSyzygyPath(const std::string &path);
+    void setSyzygyProbeDepth(int depth);
+    void setSyzygyProbeLimit(int limit);
+    void setSyzygy50MoveRule(bool enabled);
     int hashSize();
     int threadCount();
     int maxThreadCount();

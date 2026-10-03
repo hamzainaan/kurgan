@@ -4,6 +4,7 @@
 #include "evaluate.h"
 #include "see.h"
 #include "stats.h"
+#include "syzygy.h"
 #include "timeman.h"
 #include "tt.h"
 #include "tuned_params.h"
@@ -84,6 +85,7 @@ namespace
     constexpr int BOUND_LOWER = tt::BOUND_LOWER;
     constexpr int BOUND_UPPER = tt::BOUND_UPPER;
     constexpr int NO_EVAL = tt::NO_EVAL;
+    constexpr int TB_WIN = MATE_THRESHOLD - MAX_PLY - 1;
 
     // Frequently accessed atomics are isolated on separate cache lines to
     // avoid false sharing: without this, a thread writing to a counter would
@@ -104,6 +106,10 @@ namespace
     int64_t nodesLimit = 0;
     int mateGoal = 0;
     Color activeUs = WHITE;
+    int syzygyProbeDepth = 1;
+    int syzygyProbeLimit = search::SYZYGY_LIMIT_MAX;
+    bool syzygy50MoveRule = true;
+    int tbCardinality = 0;
     search::SearchLimits activeLimits;
 
     std::mutex outputMutex;
@@ -763,6 +769,30 @@ namespace
 
         if (depth <= 0)
             return quiescence(pos, alpha, beta, ply);
+
+        if (ply > 0 && excluded == Move() && tbCardinality > 0)
+        {
+            const int pieces = popCount(pos.byColor[WHITE] | pos.byColor[BLACK]);
+            if (pieces <= tbCardinality && (pieces < tbCardinality || depth >= syzygyProbeDepth)
+                && pos.halfmoveClock == 0 && pos.castlingRights == 0)
+            {
+                syzygy::ProbeState result;
+                const int wdl = syzygy::probeWDL(pos, result);
+                if (result != syzygy::PROBE_FAIL)
+                {
+                    const int margin = syzygy50MoveRule ? 1 : 0;
+                    const int score = wdl < -margin  ? -TB_WIN + ply
+                                      : wdl > margin ? TB_WIN - ply
+                                                     : drawScore(pos) + 2 * wdl * margin;
+                    const int bound = wdl < -margin ? BOUND_UPPER : wdl > margin ? BOUND_LOWER : BOUND_EXACT;
+                    if (bound == BOUND_EXACT || (bound == BOUND_LOWER ? score >= beta : score <= alpha))
+                    {
+                        tt::store(key, Move(), score, std::min(MAX_PLY - 1, depth + 6), bound, ply);
+                        return score;
+                    }
+                }
+            }
+        }
 
         setContinuationRows(pos, ply);
 
@@ -1681,6 +1711,22 @@ void search::prepare(const Position &root, const SearchLimits &limits)
         }
     }
 
+    tbCardinality = std::min(syzygyProbeLimit, syzygy::maxCardinality());
+    if (tbCardinality > 0 && root.castlingRights == 0
+        && popCount(root.byColor[WHITE] | root.byColor[BLACK]) <= tbCardinality)
+    {
+        Position probe = root;
+        std::vector<Move> ranked = activeLimits.searchmoves;
+        bool dtzUsed = false;
+        bool winning = false;
+        if (syzygy::rankRoot(probe, ranked, dtzUsed, winning))
+        {
+            activeLimits.searchmoves = std::move(ranked);
+            if (dtzUsed || !winning)
+                tbCardinality = 0;
+        }
+    }
+
     activeUs = root.sideToMove;
     nodesLimit = limits.nodes;
     mateGoal = limits.mate;
@@ -1860,6 +1906,31 @@ void search::setPonder(bool enabled)
 void search::setMoveOverhead(int ms)
 {
     manager::setMoveOverhead(clampOption("Move Overhead", ms, MOVE_OVERHEAD_MIN, MOVE_OVERHEAD_MAX));
+}
+
+void search::setSyzygyPath(const std::string &path)
+{
+    const int found = syzygy::init(path);
+    if (!silentOutput)
+    {
+        std::lock_guard<std::mutex> lock(outputMutex);
+        std::cout << "info string Found " << found << " tablebases" << std::endl;
+    }
+}
+
+void search::setSyzygyProbeDepth(int depth)
+{
+    syzygyProbeDepth = clampOption("SyzygyProbeDepth", depth, SYZYGY_DEPTH_MIN, SYZYGY_DEPTH_MAX);
+}
+
+void search::setSyzygyProbeLimit(int limit)
+{
+    syzygyProbeLimit = clampOption("SyzygyProbeLimit", limit, SYZYGY_LIMIT_MIN, SYZYGY_LIMIT_MAX);
+}
+
+void search::setSyzygy50MoveRule(bool enabled)
+{
+    syzygy50MoveRule = enabled;
 }
 
 void search::ponderhit()

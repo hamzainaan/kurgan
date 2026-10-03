@@ -258,6 +258,12 @@ void uci::loop()
             std::cout << "option name Move Overhead type spin default " << search::MOVE_OVERHEAD_DEFAULT
                       << " min " << search::MOVE_OVERHEAD_MIN << " max " << search::MOVE_OVERHEAD_MAX << std::endl;
             std::cout << "option name UCI_Chess960 type check default false" << std::endl;
+            std::cout << "option name SyzygyPath type string default <empty>" << std::endl;
+            std::cout << "option name SyzygyProbeDepth type spin default 1 min " << search::SYZYGY_DEPTH_MIN
+                      << " max " << search::SYZYGY_DEPTH_MAX << std::endl;
+            std::cout << "option name Syzygy50MoveRule type check default true" << std::endl;
+            std::cout << "option name SyzygyProbeLimit type spin default " << search::SYZYGY_LIMIT_MAX << " min "
+                      << search::SYZYGY_LIMIT_MIN << " max " << search::SYZYGY_LIMIT_MAX << std::endl;
             std::cout << "option name Use NNUE type check default true" << std::endl;
             std::cout << "option name Search Stats type check default false" << std::endl;
             if (nnue::loaded())
@@ -328,6 +334,14 @@ void uci::loop()
                     search::setContempt(std::stoi(value));
                 else if (name == "Move Overhead")
                     search::setMoveOverhead(std::stoi(value));
+                else if (name == "SyzygyPath")
+                    search::setSyzygyPath(value);
+                else if (name == "SyzygyProbeDepth")
+                    search::setSyzygyProbeDepth(std::stoi(value));
+                else if (name == "SyzygyProbeLimit")
+                    search::setSyzygyProbeLimit(std::stoi(value));
+                else if (name == "Syzygy50MoveRule")
+                    search::setSyzygy50MoveRule(value == "true");
                 else if (name == "Clear Hash")
                     search::clear();
                 else if (name == "Use NNUE")
