@@ -1658,7 +1658,7 @@ namespace
                 manager::observe(previousScore, scoreDrop, stableIterations);
 
                 if (manager::budgeted()
-                    && manager::shouldStop(pos, previousScore, scoreDrop, stableIterations,
+                    && manager::shouldStop(pos, previousScore, scoreDrop, stableIterations, depth,
                                            manager::elapsedMs() - iterationStart))
                     stopFlag.store(true, std::memory_order_relaxed);
             }
@@ -1673,7 +1673,7 @@ namespace
         }
 
         if (isMain && completedDepth > 0)
-            manager::recordScore(lastCompletedScore);
+            manager::recordScore(lastCompletedScore, completedDepth);
 
         globalNodes.fetch_add(nodes, std::memory_order_relaxed);
 

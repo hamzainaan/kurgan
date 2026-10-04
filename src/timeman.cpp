@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <cmath>
 
 namespace manager
 {
@@ -18,8 +19,8 @@ namespace manager
     constexpr double STABLE_ITERATIONS = 6.0;
     constexpr double DECIDED_SCORE = 500.0;
     constexpr double TENSION_MOVES = 3.0;
-    constexpr double TIME_SCALE_MIN = 0.55;
-    constexpr double TIME_SCALE_MAX = 1.35;
+    constexpr double TIME_SCALE_MIN = 0.75;
+    constexpr double TIME_SCALE_MAX = 1.40;
     constexpr double PRESSURE_W = 0.30;
     constexpr double SWING_W = 0.20;
     constexpr double INSTABILITY_W = 0.20;
@@ -47,7 +48,20 @@ namespace manager
     constexpr int64_t MAX_CAP_MOVES = 6;
     constexpr int EASY_ITERATIONS = 3;
     constexpr int EASY_SWING = 12;
-    constexpr double EASY_SCALE = 0.65;
+    constexpr double EASY_SCALE = 0.85;
+    constexpr int EASY_MIN_DEPTH = 6;
+    constexpr double EASY_DEPTH_PER_LOG2 = 1.0;
+    constexpr int EASY_DEPTH_MAX = 18;
+    constexpr int DEPTH_ANCHOR_SLACK = 2;
+    constexpr double CLOCK_LEAD_W = 0.18;
+    constexpr double CLOCK_LEAD_MIN = 0.85;
+    constexpr double CLOCK_LEAD_MAX = 1.25;
+    constexpr double BANK_W = 0.40;
+    constexpr double BANK_REF_MS = 60000.0;
+    constexpr double BANK_INCREMENT_MS = 1000.0;
+    constexpr double BANK_MAX = 1.40;
+    constexpr double DANGER_W = 0.15;
+    constexpr double DECIDED_TENSION_W = 0.5;
     constexpr int UNSTABLE_ITERATIONS = 2;
     constexpr double UNSTABLE_SCALE = 1.30;
     constexpr double FALLING_SCALE = 60.0;
@@ -62,13 +76,16 @@ namespace manager
     std::atomic<int> extensionsUsed{0};
     std::atomic<double> extendMax{EXTEND_MAX};
     std::atomic<bool> failingLow{false};
+    std::atomic<int> easyStopDepth{0};
 
     int64_t lastScore = 0;
     bool hasLastScore = false;
     double pressure = 0.0;
+    int previousDepth = 0;
     int64_t moveOverheadMs = search::MOVE_OVERHEAD_DEFAULT;
 
     double rootTension = 0.0;
+    double rootDanger = 0.0;
     bool singleReply = false;
 
     int observedScore = 0;
@@ -98,10 +115,12 @@ namespace manager
         const double phase = std::clamp((32.0 - pieces) / 20.0, 0.0, 1.0);
         const double stage = 1.0 - 2.0 * (phase < 0.5 ? 0.5 - phase : phase - 0.5);
 
-        const double decided = std::min(1.0, decidedScore / DECIDED_SCORE);
+        const double decided = std::min(1.0, decidedScore / DECIDED_SCORE)
+                               * (1.0 - DECIDED_TENSION_W * rootTension);
 
         return std::clamp(PRESSURE_W * pressureTerm + SWING_W * swingTerm + INSTABILITY_W * instability
-                              + STAGE_W * stage + TENSION_W * rootTension - DECIDED_W * decided,
+                              + STAGE_W * stage + TENSION_W * rootTension + DANGER_W * rootDanger
+                              - DECIDED_W * decided,
                           0.0, 1.0);
     }
 
@@ -155,6 +174,7 @@ namespace manager
         if (inCheck)
         {
             rootTension = 1.0;
+            rootDanger = 1.0;
             return;
         }
 
@@ -165,6 +185,8 @@ namespace manager
         const int threats = winningCaptures(flipped, false);
 
         rootTension = std::min(1.0, (gains + threats) / TENSION_MOVES);
+        // How much of that tension is the opponent threatening us.
+        rootDanger = std::min(1.0, threats / TENSION_MOVES);
     }
 
     void computeDeadline(const search::SearchLimits &limits, Color us)
@@ -177,6 +199,7 @@ namespace manager
         ceilingMs.store(0, std::memory_order_relaxed);
         extendMax.store(EXTEND_MAX, std::memory_order_relaxed);
         failingLow.store(false, std::memory_order_relaxed);
+        easyStopDepth.store(0, std::memory_order_relaxed);
 
         if (limits.movetime > 0)
         {
@@ -186,10 +209,29 @@ namespace manager
         {
             const int64_t myTime = us == WHITE ? limits.wtime : limits.btime;
             const int64_t myInc = us == WHITE ? limits.winc : limits.binc;
+            const int64_t oppTime = us == WHITE ? limits.btime : limits.wtime;
+            const int64_t oppInc = us == WHITE ? limits.binc : limits.winc;
             const int64_t available = std::max<int64_t>(1, myTime - moveOverheadMs);
+            const int64_t oppAvailable = std::max<int64_t>(1, oppTime - moveOverheadMs);
             const int64_t horizon = limits.movestogo > 0 ? std::min<int64_t>(limits.movestogo, HORIZON_MOVES) : HORIZON_MOVES;
 
             int64_t optimum = available / horizon + myInc / 2;
+
+            const double bankRoom = std::clamp(static_cast<double>(available) / BANK_REF_MS - 1.0, 0.0, 1.0);
+            const double incRelief = std::min(1.0, static_cast<double>(myInc) / BANK_INCREMENT_MS);
+            const double bank = 1.0 + (BANK_MAX - 1.0) * bankRoom * incRelief;
+
+            const double myBudget = static_cast<double>(available) + 0.5 * static_cast<double>(myInc) * static_cast<double>(horizon);
+            const double oppBudget = static_cast<double>(oppAvailable) + 0.5 * static_cast<double>(oppInc) * static_cast<double>(horizon);
+            const double ratio = myBudget / std::max(1.0, oppBudget);
+            const double clockLead = std::clamp(1.0 + CLOCK_LEAD_W * std::log2(ratio), CLOCK_LEAD_MIN, CLOCK_LEAD_MAX);
+
+            optimum = static_cast<int64_t>(static_cast<double>(optimum) * bank * clockLead);
+
+            const double clockDepth = std::log2(static_cast<double>(std::max<int64_t>(1, available)) / 100.0);
+            easyStopDepth.store(std::clamp(static_cast<int>(EASY_MIN_DEPTH + clockDepth * EASY_DEPTH_PER_LOG2),
+                                           EASY_MIN_DEPTH, EASY_DEPTH_MAX),
+                                std::memory_order_relaxed);
 
             const double lowClock = std::clamp(1.0 - static_cast<double>(optimum) / LOW_CLOCK_OPTIMUM_MS, 0.0, 1.0);
             extendMax.store(lerp(EXTEND_MAX, EXTEND_MAX_LOW, lowClock), std::memory_order_relaxed);
@@ -270,7 +312,7 @@ namespace manager
         return true;
     }
 
-    void recordScore(int score)
+    void recordScore(int score, int depth)
     {
         const int64_t scoreCp = lastScore < 0 ? -lastScore : lastScore;
         const int64_t completedCp = score < 0 ? -score : score;
@@ -283,6 +325,7 @@ namespace manager
 
         lastScore = score;
         hasLastScore = true;
+        previousDepth = std::max(0, depth);
     }
 
     void reset()
@@ -290,6 +333,7 @@ namespace manager
         lastScore = 0;
         hasLastScore = false;
         pressure = 0.0;
+        previousDepth = 0;
     }
 
     bool budgeted()
@@ -308,12 +352,16 @@ namespace manager
         failingLow.store(failing, std::memory_order_relaxed);
     }
 
-    bool shouldStop(const Position &pos, int score, int scoreDrop, int stableIterations, int64_t lastIterationMs)
+    bool shouldStop(const Position &pos, int score, int scoreDrop, int stableIterations, int depth, int64_t lastIterationMs)
     {
         const int swing = scoreDrop < 0 ? -scoreDrop : scoreDrop;
 
+        // The cheap exit is gated.
+        const int stopDepth = std::max(easyStopDepth.load(std::memory_order_relaxed),
+                                       previousDepth - DEPTH_ANCHOR_SLACK);
+
         double factor = 1.0;
-        if (stableIterations >= EASY_ITERATIONS && swing <= EASY_SWING)
+        if (depth >= stopDepth && stableIterations >= EASY_ITERATIONS && swing <= EASY_SWING)
             factor = EASY_SCALE;
         else
         {
