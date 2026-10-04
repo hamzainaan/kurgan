@@ -23,7 +23,7 @@ enum MoveFlag : uint16_t
 // A 16-bit move: from (6 bits) | to (6 bits) | flags (4 bits).
 struct Move
 {
-    uint16_t data = 0;
+    uint16_t data;
 
     constexpr Move() = default;
     constexpr Move(uint16_t d) : data(d)
@@ -71,7 +71,7 @@ struct MoveList
 {
     static constexpr int MAX_MOVES = 512;
 
-    std::array<Move, MAX_MOVES> moves{};
+    std::array<Move, MAX_MOVES> moves;
     int size = 0;
 
     void add(Move m)

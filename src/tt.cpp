@@ -84,7 +84,7 @@ namespace
                && (e.key != stored || bound != tt::BOUND_EXACT);
     }
 
-    void save(tt::Entry &e, uint64_t stored, Move move, int score, int depth, int bound, int ply, int eval)
+    void save(tt::Entry &e, uint64_t stored, Move move, int score, int depth, int bound, int ply, int eval, bool pv)
     {
         // Store mix.
         if (bound == tt::BOUND_EXACT)
@@ -98,7 +98,7 @@ namespace
         e.move = move;
         e.score = static_cast<int16_t>(tt::scoreToTT(score, ply));
         e.eval = static_cast<int16_t>(eval);
-        e.depth = static_cast<uint8_t>(std::clamp(depth, 0, 255));
+        e.depthPv = static_cast<uint8_t>(std::clamp(depth, 0, 127) | (pv ? 128 : 0));
         e.genBound = static_cast<uint8_t>((generation << 2) | bound);
     }
 }
@@ -177,7 +177,7 @@ tt::Entry *tt::probe(uint64_t key)
     return nullptr;
 }
 
-void tt::store(uint64_t key, Move move, int score, int depth, int bound, int ply, int eval)
+void tt::store(uint64_t key, Move move, int score, int depth, int bound, int ply, int eval, bool pv)
 {
     if (table == nullptr)
         return;
@@ -191,8 +191,8 @@ void tt::store(uint64_t key, Move move, int score, int depth, int bound, int ply
     {
         if (e.key == stored)
         {
-            if (!protectedMate(e, stored, bound) && (bound == BOUND_EXACT || depth + 4 > e.depth || e.age(generation) != 0))
-                save(e, stored, move == Move() ? e.move : move, score, depth, bound, ply, eval);
+            if (!protectedMate(e, stored, bound) && (bound == BOUND_EXACT || depth + 4 > e.depth() || e.age(generation) != 0))
+                save(e, stored, move == Move() ? e.move : move, score, depth, bound, ply, eval, pv);
             return;
         }
         if (freeSlot == nullptr && e.empty())
@@ -201,7 +201,7 @@ void tt::store(uint64_t key, Move move, int score, int depth, int bound, int ply
 
     if (freeSlot != nullptr)
     {
-        save(*freeSlot, stored, move, score, depth, bound, ply, eval);
+        save(*freeSlot, stored, move, score, depth, bound, ply, eval, pv);
         return;
     }
 
@@ -213,7 +213,7 @@ void tt::store(uint64_t key, Move move, int score, int depth, int bound, int ply
         if (protectedMate(e, stored, bound))
             continue;
 
-        const int value = e.age(generation) * 256 + e.depth;
+        const int value = e.depth() - 8 * e.age(generation);
         if (victim == nullptr || value < worst)
         {
             worst = value;
@@ -222,7 +222,7 @@ void tt::store(uint64_t key, Move move, int score, int depth, int bound, int ply
     }
 
     if (victim != nullptr)
-        save(*victim, stored, move, score, depth, bound, ply, eval);
+        save(*victim, stored, move, score, depth, bound, ply, eval, pv);
 }
 
 int tt::hashfull()

@@ -1,6 +1,9 @@
 #include "evaluate.h"
 
+#include "endgame.h"
 #include "nnue.h"
+#include "position.h"
+#include "stats.h"
 
 #ifndef KURGAN_HCE_OFF
 
@@ -916,20 +919,35 @@ int evaluate::hce(const Position &pos)
 
 #endif // KURGAN_HCE_OFF
 
+namespace
+{
+    int baseEvaluate(const Position &pos)
+    {
+#ifdef KURGAN_NNUE
+        if (nnue::active())
+            return nnue::evaluate(pos);
+#endif
+#ifdef KURGAN_HCE_OFF
+        (void) pos;
+        return 0;
+#else
+        return evaluate::hce(pos);
+#endif
+    }
+}
+
 int evaluate::evaluate(const Position &pos)
 {
     ++stats::current().evalCalls;
 
-#ifdef KURGAN_NNUE
-    if (nnue::active())
-        return nnue::evaluate(pos);
-#endif
-#ifdef KURGAN_HCE_OFF
-    (void) pos;
-    return 0;
-#else
-    return hce(pos);
-#endif
+    int value = 0;
+    if (endgame::evaluate(pos, value))
+        return value;
+
+    value = baseEvaluate(pos);
+    const Color strong = value >= 0 ? pos.sideToMove : static_cast<Color>(pos.sideToMove ^ 1);
+    const int factor = endgame::scale(pos, strong);
+    return factor == endgame::SCALE_NORMAL ? value : value * factor / endgame::SCALE_NORMAL;
 }
 
 const char *evaluate::name()

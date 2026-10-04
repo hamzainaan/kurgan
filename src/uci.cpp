@@ -1,6 +1,7 @@
 #include "uci.h"
 
 #include "bench.h"
+#include "datagen.h"
 #include "evaluate.h"
 #include "movegen.h"
 #include "nnue.h"
@@ -413,6 +414,7 @@ void uci::loop()
 #endif
             if (nnue::loaded())
                 std::cout << "eval nnue " << nnue::evaluate(pos) << std::endl;
+            std::cout << "eval final " << evaluate::evaluate(pos) << std::endl;
         }
         else if (cmd == "debug")
         {
@@ -432,6 +434,34 @@ void uci::loop()
             int depth = 0;
             ss >> depth;
             bench::run(depth);
+        }
+        else if (cmd == "datagen")
+        {
+            joinSearch();
+            datagen::Options options;
+            std::string key;
+            while (ss >> key)
+            {
+                if (key == "threads")
+                    ss >> options.workers;
+                else if (key == "positions")
+                    ss >> options.positions;
+                else if (key == "softnodes")
+                    ss >> options.softNodes;
+                else if (key == "hardnodes")
+                    ss >> options.hardNodes;
+                else if (key == "randomplies")
+                    ss >> options.randomPlies;
+                else if (key == "hash")
+                    ss >> options.hash;
+                else if (key == "seed")
+                    ss >> options.seed;
+                else if (key == "out")
+                    ss >> options.out;
+                else
+                    std::cout << "info string unknown datagen option " << key << std::endl;
+            }
+            datagen::run(options);
         }
         else if (cmd == "quit")
         {

@@ -91,6 +91,7 @@ public:
     // Incrementally maintained Zobrist hash of the position.
     uint64_t zobristKey = 0;
     uint64_t pawnKey = 0;
+    std::array<uint64_t, COLOR_NB> nonPawnKey{};
 
 private:
     static constexpr int MAX_UNDO = 256;

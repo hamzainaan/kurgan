@@ -1,5 +1,6 @@
 #include "search.h"
 
+#include "endgame.h"
 #include "evaluate.h"
 #include "see.h"
 #include "stats.h"
@@ -109,6 +110,7 @@ namespace
     std::mutex bestMutex;
     bool silentOutput = false;
     int completedDepth = 0;
+    int finalScore = 0;
     Move finalBestMove;
     Move finalPonderMove;
 
@@ -135,13 +137,22 @@ namespace
     constexpr size_t CONT_ENTRIES = static_cast<size_t>(CONT_PLIES) * PIECE_TO_NB * PIECE_TO_NB;
     constexpr size_t PAWN_ENTRIES = static_cast<size_t>(PAWN_HISTORY_NB) * PIECE_TO_NB;
     constexpr size_t COUNTER_ENTRIES = static_cast<size_t>(COLOR_NB) * SQUARE_NB * SQUARE_NB;
+    constexpr int CORR_NB = 16384;
+    constexpr int CORR_LIMIT = 1024;
+    constexpr int CORR_DIV = 14;
+    constexpr size_t PAWN_CORR_ENTRIES = static_cast<size_t>(COLOR_NB) * CORR_NB;
+    constexpr size_t NON_PAWN_CORR_ENTRIES = static_cast<size_t>(COLOR_NB) * COLOR_NB * CORR_NB;
     std::mutex historyMutex;
     std::vector<std::vector<int16_t>> contSlices; // one slice per worker slot
     std::vector<std::vector<int16_t>> pawnSlices;
     std::vector<std::vector<Move>> counterSlices;
+    std::vector<std::vector<int16_t>> pawnCorrSlices;
+    std::vector<std::vector<int16_t>> nonPawnCorrSlices;
     thread_local int16_t *contHistory = nullptr; // this worker's slice
     thread_local int16_t *pawnHistory = nullptr;
     thread_local Move *counterMoves = nullptr;
+    thread_local int16_t *pawnCorr = nullptr;
+    thread_local int16_t *nonPawnCorr = nullptr;
     thread_local int16_t *contRows[CONT_PLIES][MAX_PLY + 2];
     thread_local Piece movedPieceStack[MAX_PLY + 2];
 
@@ -383,17 +394,23 @@ namespace
             contSlices.resize(slot + 1);
             pawnSlices.resize(slot + 1);
             counterSlices.resize(slot + 1);
+            pawnCorrSlices.resize(slot + 1);
+            nonPawnCorrSlices.resize(slot + 1);
         }
         if (contSlices[slot].empty())
         {
             contSlices[slot].assign(CONT_ENTRIES, 0);
             pawnSlices[slot].assign(PAWN_ENTRIES, 0);
             counterSlices[slot].assign(COUNTER_ENTRIES, Move());
+            pawnCorrSlices[slot].assign(PAWN_CORR_ENTRIES, 0);
+            nonPawnCorrSlices[slot].assign(NON_PAWN_CORR_ENTRIES, 0);
         }
 
         contHistory = contSlices[slot].data();
         pawnHistory = pawnSlices[slot].data();
         counterMoves = counterSlices[slot].data();
+        pawnCorr = pawnCorrSlices[slot].data();
+        nonPawnCorr = nonPawnCorrSlices[slot].data();
     }
 
     void clearHistorySlices()
@@ -405,6 +422,10 @@ namespace
             std::fill(slice.begin(), slice.end(), 0);
         for (std::vector<Move> &slice : counterSlices)
             std::fill(slice.begin(), slice.end(), Move());
+        for (std::vector<int16_t> &slice : pawnCorrSlices)
+            std::fill(slice.begin(), slice.end(), 0);
+        for (std::vector<int16_t> &slice : nonPawnCorrSlices)
+            std::fill(slice.begin(), slice.end(), 0);
     }
 
     Move &counterMoveEntry(Color c, Move prev)
@@ -416,6 +437,37 @@ namespace
     {
         const size_t row = static_cast<uint32_t>(pos.pawnKey) & (PAWN_HISTORY_NB - 1);
         return pawnHistory[row * PIECE_TO_NB + pieceToIndex(piece, to)];
+    }
+
+    int16_t &pawnCorrEntry(const Position &pos)
+    {
+        return pawnCorr[static_cast<size_t>(pos.sideToMove) * CORR_NB + (pos.pawnKey & (CORR_NB - 1))];
+    }
+
+    int16_t &nonPawnCorrEntry(const Position &pos, Color c)
+    {
+        return nonPawnCorr[(static_cast<size_t>(c) * COLOR_NB + pos.sideToMove) * CORR_NB + (pos.nonPawnKey[c] & (CORR_NB - 1))];
+    }
+
+    int correctedEval(const Position &pos, int raw)
+    {
+        const int corr = pawnCorrEntry(pos) + nonPawnCorrEntry(pos, WHITE) + nonPawnCorrEntry(pos, BLACK);
+        return std::clamp(raw + corr / CORR_DIV, -MATE_THRESHOLD + 1, MATE_THRESHOLD - 1);
+    }
+
+    void updateCorrection(int16_t &h, int bonus)
+    {
+        int value = h;
+        value += bonus - value * std::abs(bonus) / CORR_LIMIT;
+        h = static_cast<int16_t>(std::clamp(value, -CORR_LIMIT, CORR_LIMIT));
+    }
+
+    void updateCorrections(const Position &pos, int diff, int depth)
+    {
+        const int bonus = std::clamp(diff * depth / 8, -CORR_LIMIT / 4, CORR_LIMIT / 4);
+        updateCorrection(pawnCorrEntry(pos), bonus);
+        updateCorrection(nonPawnCorrEntry(pos, WHITE), bonus);
+        updateCorrection(nonPawnCorrEntry(pos, BLACK), bonus);
     }
 
     void setContinuationRows(const Position &pos, int ply)
@@ -451,8 +503,8 @@ namespace
     {
         int score;
         Move move;
-        uint16_t order = 0; // generation index, used as a stable tie-break
-        int history = 0;
+        uint16_t order; // generation index, used as a stable tie-break
+        int history;
     };
 
     constexpr int TT_MOVE_SCORE = 10000000;
@@ -469,7 +521,7 @@ namespace
         int index = 0;
         int deferredCount = 0;
         int deferredIndex = 0;
-        Move ttMove;
+        Move ttMove{};
         int lastSee = 0;          // SEE of the move returned by the last next()
         bool lastSeeValid = false; // false when SEE was not evaluated for it
         bool qsearch = false;
@@ -722,12 +774,12 @@ namespace
         const Move counter = prevMove == Move() ? Move() : counterMoveEntry(us, prevMove);
 
         if (ply > 0 && (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos) || pos.isRepetition(ply)))
-            return drawScore(pos);
+            return drawScore(pos) + 1 - static_cast<int>(nodes & 2);
 
         // Transposition table probe.
         const tt::Entry *tte = excluded == Move() ? tt::probe(key) : nullptr;
         const bool ttHit = tte != nullptr;
-        Move ttMove;
+        Move ttMove{};
         int ttScore = 0;
         int ttDepth = 0;
         int ttBound = BOUND_NONE;
@@ -736,7 +788,7 @@ namespace
         {
             ttMove = tte->move;
             ttScore = tt::scoreFromTT(tte->score, ply);
-            ttDepth = tte->depth;
+            ttDepth = tte->depth();
             ttBound = tte->bound();
             ttEval = tte->eval;
 
@@ -763,6 +815,8 @@ namespace
         if (depth <= 0)
             return quiescence(pos, alpha, beta, ply);
 
+        const bool ttPv = pvNode || (ttHit && tte->pv());
+
         setContinuationRows(pos, ply);
 
         const Square ksq = kingSquare(pos, us);
@@ -770,14 +824,16 @@ namespace
                              movegen::squareAttacked(pos, ksq, static_cast<Color>(us ^ 1));
 
         int staticEval;
+        int rawEval = NO_EVAL;
         if (inCheck)
             staticEval = NO_EVAL;
         else if (excluded != Move())
             staticEval = staticEvalStack[ply];
-        else if (ttEval != NO_EVAL)
-            staticEval = ttEval;
         else
-            staticEval = evaluate::evaluate(pos);
+        {
+            rawEval = ttEval != NO_EVAL ? ttEval : evaluate::evaluate(pos);
+            staticEval = correctedEval(pos, rawEval);
+        }
         staticEvalStack[ply] = staticEval;
 
         int eval = staticEval;
@@ -807,10 +863,10 @@ namespace
                 }
             }
 
-            if (depth <= tuned::RFP_DEPTH && eval - tuned::RFP_MARGIN * (depth - improving) >= beta)
+            if (!ttPv && depth <= tuned::RFP_DEPTH && eval - tuned::RFP_MARGIN * (depth - improving) >= beta)
             {
                 ++stats::current().rfpCutoffs;
-                return eval;
+                return (eval + beta) / 2;
             }
         }
 
@@ -884,7 +940,7 @@ namespace
                 if (score >= probcutBeta)
                 {
                     ++stats::current().probcutCutoffs;
-                    tt::store(key, m, score, depth - tuned::PROBCUT_DEPTH + 2, BOUND_LOWER, ply, staticEval);
+                    tt::store(key, m, score, depth - tuned::PROBCUT_DEPTH + 2, BOUND_LOWER, ply, rawEval, ttPv);
                     return score;
                 }
             }
@@ -902,7 +958,7 @@ namespace
         MovePicker picker;
         picker.init(pos, list, ttMove, counter, ply, false);
 
-        Move bestMove;
+        Move bestMove{};
         int bestScore = -INF;
         int legalMoves = 0;
         const bool ttCapture = ttMove != Move() && isTactical(pos, ttMove);
@@ -1034,7 +1090,7 @@ namespace
                     else
                         r = tuned::LMR_CAPTURE_BASE - histScore / tuned::LMR_CAPHIST_DIV;
 
-                    r -= checks;
+                    r -= checks + ttPv;
                     r = std::clamp(r, 0, std::max(0, newDepth - 1));
                 }
                 if (r > 0)
@@ -1144,7 +1200,7 @@ namespace
             if (excluded != Move())
                 return alpha;
             const int score = inCheck ? -MATE + ply : drawScore(pos);
-            tt::store(key, Move(), score, depth, BOUND_EXACT, ply);
+            tt::store(key, Move(), score, depth, BOUND_EXACT, ply, NO_EVAL, ttPv);
             return score;
         }
 
@@ -1158,7 +1214,13 @@ namespace
             else
                 bound = BOUND_EXACT;
 
-            tt::store(key, bound == BOUND_UPPER ? Move() : bestMove, bestScore, depth, bound, ply, staticEval);
+            tt::store(key, bound == BOUND_UPPER ? Move() : bestMove, bestScore, depth, bound, ply, rawEval, ttPv);
+
+            if (!inCheck && (bound == BOUND_UPPER || !isTactical(pos, bestMove))
+                && !(bound == BOUND_LOWER && bestScore <= staticEval)
+                && !(bound == BOUND_UPPER && bestScore >= staticEval)
+                && bestScore > -MATE_THRESHOLD && bestScore < MATE_THRESHOLD)
+                updateCorrections(pos, bestScore - staticEval, depth);
         }
 
         return bestScore;
@@ -1197,7 +1259,7 @@ namespace
             return drawScore(pos);
 
         const tt::Entry *tte = tt::probe(key);
-        Move ttMove;
+        Move ttMove{};
         int ttEval = NO_EVAL;
         if (tte != nullptr)
         {
@@ -1208,17 +1270,19 @@ namespace
                 return s;
         }
 
+        int rawEval = NO_EVAL;
         int standPat = NO_EVAL;
         int bestScore = -MATE + ply;
         if (!inCheck)
         {
-            standPat = ttEval != NO_EVAL ? ttEval : evaluate::evaluate(pos);
+            rawEval = ttEval != NO_EVAL ? ttEval : evaluate::evaluate(pos);
+            standPat = correctedEval(pos, rawEval);
             bestScore = standPat;
             if (standPat >= beta)
             {
                 ++stats::current().standPatCutoffs;
                 if (tte == nullptr)
-                    tt::store(key, Move(), standPat, 0, BOUND_LOWER, ply, standPat);
+                    tt::store(key, Move(), standPat, 0, BOUND_LOWER, ply, rawEval);
                 return standPat;
             }
             if (standPat > alpha)
@@ -1237,7 +1301,7 @@ namespace
         picker.init(pos, list, ttMove, counter, ply, !inCheck);
 
         const int futilityBase = standPat + tuned::QS_FUTILITY_MARGIN;
-        Move bestMove;
+        Move bestMove{};
         int legalMoves = 0;
         for (Move m = picker.next(pos); m != Move(); m = picker.next(pos))
         {
@@ -1304,7 +1368,7 @@ namespace
             return -MATE + ply;
 
         const int bound = bestScore >= beta ? BOUND_LOWER : bestScore > originalAlpha ? BOUND_EXACT : BOUND_UPPER;
-        tt::store(key, bestMove, bestScore, 0, bound, ply, standPat);
+        tt::store(key, bestMove, bestScore, 0, bound, ply, rawEval, tte != nullptr && tte->pv());
         return bestScore;
     }
 
@@ -1477,6 +1541,7 @@ namespace
                     if (1 > completedDepth)
                     {
                         completedDepth = 1;
+                        finalScore = s;
                         finalBestMove = pvTable[0][0];
                         finalPonderMove = Move();
                     }
@@ -1489,7 +1554,7 @@ namespace
         int lastCompletedScore = 0;
 
         // Dynamic time management state
-        Move stableMove;
+        Move stableMove{};
         int stableIterations = 0;
         int scoreDrop = 0;
 
@@ -1555,6 +1620,7 @@ namespace
                         if (depth > completedDepth)
                         {
                             completedDepth = depth;
+                            finalScore = score;
                             finalBestMove = pvTable[0][0];
                             finalPonderMove = pvLength[0] > 1 ? pvTable[0][1] : Move();
                         }
@@ -1597,6 +1663,11 @@ namespace
                     stopFlag.store(true, std::memory_order_relaxed);
             }
 
+            if (isMain && activeLimits.softNodes > 0
+                && searchedNodes.load(std::memory_order_relaxed) + (nodes & 2047)
+                       >= static_cast<uint64_t>(activeLimits.softNodes))
+                stopFlag.store(true, std::memory_order_relaxed);
+
             if (depth >= maxDepth)
                 break;
         }
@@ -1637,6 +1708,7 @@ int search::clampOption(const char *name, int value, int minValue, int maxValue)
 void search::init()
 {
     movegen::init();
+    endgame::init();
     initReductions();
     tt::resize(static_cast<size_t>(hashSizeMb));
 }
@@ -1698,10 +1770,12 @@ void search::go(const Position &root, const SearchLimits &limits)
         movegen::init();
         tt::resize(static_cast<size_t>(hashSizeMb));
     }
+    endgame::init();
 
     globalNodes.store(0, std::memory_order_relaxed);
     searchedNodes.store(0, std::memory_order_relaxed);
     completedDepth = 0;
+    finalScore = 0;
     finalBestMove = Move();
     finalPonderMove = Move();
 
@@ -1770,6 +1844,12 @@ Move search::bestMove()
 {
     std::lock_guard<std::mutex> lock(bestMutex);
     return finalBestMove;
+}
+
+int search::bestScore()
+{
+    std::lock_guard<std::mutex> lock(bestMutex);
+    return finalScore;
 }
 
 uint64_t search::totalNodes()

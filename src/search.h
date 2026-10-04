@@ -20,6 +20,7 @@ namespace search
         int movestogo = 0; // moves until the next time control (0 = sudden death)
         int depth = 0;    // fixed depth (0 = unlimited)
         int nodes = 0;    // total node limit
+        int softNodes = 0;
         int mate = 0;     // search for a mate within this many moves
         bool ponder = false;
         // `go infinite`: keep searching until `stop`, never answer on our own.
@@ -47,6 +48,7 @@ namespace search
     void ponderhit();
 
     Move bestMove();
+    int bestScore();
     uint64_t totalNodes();
 
     // UCI spin option ranges.

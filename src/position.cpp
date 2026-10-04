@@ -168,6 +168,7 @@ void Position::clear()
     fullmoveNumber = 1;
     zobristKey = 0;
     pawnKey = 0;
+    nonPawnKey.fill(0);
     undoCount = 0;
     historyCount = 0;
     historyStart = 0;
@@ -240,6 +241,8 @@ void Position::putPiece(Piece piece, Square square)
     zobristKey ^= pieceKeys[piece][square];
     if (typeOf(piece) == PAWN)
         pawnKey ^= pieceKeys[piece][square];
+    else
+        nonPawnKey[colorOf(piece)] ^= pieceKeys[piece][square];
 }
 
 void Position::removePiece(Square square)
@@ -255,6 +258,8 @@ void Position::removePiece(Square square)
     zobristKey ^= pieceKeys[piece][square];
     if (typeOf(piece) == PAWN)
         pawnKey ^= pieceKeys[piece][square];
+    else
+        nonPawnKey[colorOf(piece)] ^= pieceKeys[piece][square];
 }
 
 bool Position::do_move(Move move)
