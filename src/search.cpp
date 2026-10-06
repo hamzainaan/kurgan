@@ -79,6 +79,17 @@ namespace
     // Transposition table bounds.
     constexpr int MATE = tt::MATE;
     constexpr int MATE_THRESHOLD = tt::MATE_THRESHOLD;
+    constexpr int INTERNAL_PAWN = tuned::MATERIAL[PAWN];
+    constexpr int UCI_PAWN = 100;
+
+    int toCentipawns(int score)
+    {
+        const int scaled = score * UCI_PAWN;
+        return scaled >= 0 ? (scaled + INTERNAL_PAWN / 2) / INTERNAL_PAWN
+                           : -((-scaled + INTERNAL_PAWN / 2) / INTERNAL_PAWN);
+    }
+
+    constexpr int KNOWN_WIN_CP = 2000;
     constexpr int BOUND_NONE = tt::BOUND_NONE;
     constexpr int BOUND_EXACT = tt::BOUND_EXACT;
     constexpr int BOUND_LOWER = tt::BOUND_LOWER;
@@ -648,8 +659,12 @@ namespace
             std::cout << " score mate " << (MATE - score + 1) / 2;
         else if (score <= -MATE_THRESHOLD)
             std::cout << " score mate " << -(MATE + score) / 2;
+        else if (score >= endgame::KNOWN_WIN)
+            std::cout << " score cp " << KNOWN_WIN_CP;
+        else if (score <= -endgame::KNOWN_WIN)
+            std::cout << " score cp " << -KNOWN_WIN_CP;
         else
-            std::cout << " score cp " << score;
+            std::cout << " score cp " << toCentipawns(score);
 
         std::cout << " nodes " << nodeCount;
         if (elapsedMs > 0)
