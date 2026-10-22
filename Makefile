@@ -36,8 +36,7 @@ ifneq ($(STAMP_TEXT),$(shell cat $(VERSION_STAMP) 2>/dev/null))
   $(shell printf '%s' '$(STAMP_TEXT)' > $(VERSION_STAMP))
 endif
 
-# Every variant links to the same output name, so a variant change has to relink
-# even though all of its objects are older than the binary already sitting there.
+# A variant change must relink because every variant writes the same binary name.
 VARIANT_STAMP := $(BUILD_DIR)/.variant-stamp
 
 ifneq ($(VARIANT),$(shell cat $(VARIANT_STAMP) 2>/dev/null))
@@ -45,9 +44,6 @@ ifneq ($(VARIANT),$(shell cat $(VARIANT_STAMP) 2>/dev/null))
   $(shell printf '%s' '$(VARIANT)' > $(VARIANT_STAMP))
 endif
 
-# ------------------------------------------------------------------
-# Platform detection (Unix, macOS, Windows)
-# ------------------------------------------------------------------
 UNAME_S := $(shell uname -s 2>/dev/null || echo Windows)
 
 ifeq ($(OS),Windows_NT)
@@ -62,9 +58,6 @@ else
   PLATFORM := unix
 endif
 
-# ------------------------------------------------------------------
-# Compiler detection: g++/clang++ vs MSVC (cl / clang-cl)
-# ------------------------------------------------------------------
 ifeq ($(CXX),cl)
   COMPILER := msvc
 else ifeq ($(CXX),clang-cl)
@@ -77,9 +70,6 @@ ifeq ($(COMPILER),msvc)
   $(error the embedded net needs g++ or clang++, MSVC cannot .incbin a net)
 endif
 
-# ------------------------------------------------------------------
-# Build modes
-# ------------------------------------------------------------------
 ifeq ($(COMPILER),msvc)
   EXE      := $(ENGINE).exe
   CPPFLAGS := /I$(SRC_DIR) /I$(BUILD_DIR) /nologo /EHsc $(FEATURE_DEFS)
@@ -157,9 +147,6 @@ else
   LINK     = $(CXX) $(ALLFLAGS) $(LINK_OBJS) -o $@ $(LDFLAGS)
 endif
 
-# ------------------------------------------------------------------
-# Targets
-# ------------------------------------------------------------------
 all: $(EXE)
 
 $(EXE): $(LINK_OBJS) $(VARIANT_STAMP)
@@ -171,17 +158,13 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | $(OBJ_DIR)
 $(OBJ_DIR):
 	$(MKDIR) $(OBJ_DIR)
 
-# Mach-O wants its own section directive and a leading underscore on symbols.
+# Mach-O needs its own section directive and an underscore prefix on symbols.
 $(BUILD_DIR)/net.S: $(EMBED_NET) | $(OBJ_DIR)
 	printf '#ifdef __APPLE__\n\t.const_data\n\t.globl _kEmbeddedNet\n_kEmbeddedNet:\n\t.incbin "%s"\n\t.globl _kEmbeddedNetEnd\n_kEmbeddedNetEnd:\n#else\n\t.section .rodata\n\t.globl kEmbeddedNet\nkEmbeddedNet:\n\t.incbin "%s"\n\t.globl kEmbeddedNetEnd\nkEmbeddedNetEnd:\n#endif\n' '$(EMBED_NET)' '$(EMBED_NET)' > $@
 
 $(BUILD_DIR)/net.o: $(BUILD_DIR)/net.S
 	$(CXX) $(ARCHFLAGS) $(CXXFLAGS) -c $< -o $@
 
-# Profile-guided optimisation flow:
-#   1. make MODE=profile-gen
-#   2. make bench
-#   3. make MODE=profile-use
 bench: $(EXE)
 	printf 'bench\nquit\n' | ./$(EXE)
 

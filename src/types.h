@@ -3,10 +3,10 @@
 #include <bit>
 #include <cstdint>
 
-// 64-bit unsigned integer with one bit per square.
+// One bit per square.
 using Bitboard = uint64_t;
 
-// Squares are indexed rank-major (A1 = 0, H8 = 63).
+// Squares run from A1 at 0 to H8 at 63.
 enum Square : int
 {
     SQ_A1,
@@ -122,7 +122,7 @@ enum PieceType : int
     PIECE_TYPE_NB = 8
 };
 
-// Piece = (Color << 3) | (PieceType + 1); NO_PIECE = 0.
+// Piece is (Color << 3) | (PieceType + 1), and NO_PIECE is 0.
 enum Piece : int
 {
     NO_PIECE,
@@ -141,7 +141,6 @@ enum Piece : int
     PIECE_NB = 16
 };
 
-// Bit-scan and population-count helpers shared by every module.
 constexpr int popCount(Bitboard b)
 {
     return std::popcount(b);
@@ -164,7 +163,7 @@ inline Square popLsb(Bitboard &b)
     return s;
 }
 
-// SplitMix64: advance 'state' and return the next value of the stream.
+// Advances the SplitMix64 state and returns the next value.
 inline uint64_t splitMix64(uint64_t &state)
 {
     uint64_t z = (state += 0x9E3779B97F4A7C15ULL);
@@ -193,7 +192,7 @@ constexpr Rank rankOf(Square s)
     return static_cast<Rank>(static_cast<int>(s) >> 3);
 }
 
-// Material values in centipawns, indexed by PieceType.
+// Material values in centipawns by piece type.
 constexpr int pieceValue(PieceType pt)
 {
     constexpr int value[PIECE_TYPE_NB] = {100, 320, 330, 500, 900, 20000, 0, 0};

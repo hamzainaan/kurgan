@@ -287,4 +287,4 @@ inline int LMR_CAPHIST_DIV = 5055;
 inline int HIST_BONUS_MUL = 32;
 inline int HIST_BONUS_MAX = 4098;
 
-} // namespace tuned
+}

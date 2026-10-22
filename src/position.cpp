@@ -52,7 +52,6 @@ namespace
 
 namespace
 {
-    // --- Zobrist hashing ---
     uint64_t rngState = 0x9E3779B97F4A7C15ULL;
 
     uint64_t rand64()
@@ -216,14 +215,11 @@ bool Position::do_move(Move move)
     const PieceType pt = typeOf(piece);
     const bool castling = move.isCastling();
 
-    // Castling legality is verified here so
-    // that callers which only generate pseudo-legal moves can rely on the
-    // return value. In Chess960 the king and rook may start on any back-rank
-    // file, so this can never be decided from the move alone.
+    // Verify castling here because callers may only generate pseudo-legal moves.
+    // In Chess960 the king and rook can start on any back-rank file.
     if (castling && !movegen::canCastle(*this, move))
         return false;
 
-    // Save state for unmake.
     UndoInfo &undo = undoStack[undoCount];
     undoCount = (undoCount + 1) & (MAX_UNDO - 1);
     undo.movedPiece = piece;
@@ -234,7 +230,6 @@ bool Position::do_move(Move move)
     undo.prevHistoryCount = historyCount;
     undo.prevHistoryStart = historyStart;
 
-    // Move the piece.
     removePiece(from);
 
     if (castling)
@@ -285,7 +280,6 @@ bool Position::do_move(Move move)
         }
     }
 
-    // Update state.
     enPassantSquare = (pt == PAWN && (from ^ to) == 16) ? static_cast<Square>((from + to) / 2) : SQ_NONE;
 
     if (pt == PAWN || undo.capturedPiece != NO_PIECE)
@@ -298,14 +292,13 @@ bool Position::do_move(Move move)
 
     sideToMove = them;
 
-    // Update hash (side, castling, en passant).
     zobristKey ^= sideKey;
     zobristKey ^= castlingKeys[undo.prevCastlingRights] ^ castlingKeys[castlingRights];
     zobristKey ^= epKey(undo.prevEnPassantSquare) ^ epKey(enPassantSquare);
 
-    // Track position history for repetition detection.
+    // An irreversible move resets the repetition window.
     if (pt == PAWN || undo.capturedPiece != NO_PIECE)
-        historyStart = historyCount; // irreversible move: nothing earlier can repeat
+        historyStart = historyCount;
     historyKeys[historyCount & (MAX_HISTORY - 1)] = zobristKey;
     ++historyCount;
 
@@ -331,18 +324,17 @@ bool Position::do_move(Move move)
 
 void Position::undo_move(Move move)
 {
-    const Color us = static_cast<Color>(sideToMove ^ 1); // side that moved
+    // Recover the side that made the move.
+    const Color us = static_cast<Color>(sideToMove ^ 1);
     const Square from = move.from();
     const Square to = move.to();
     undoCount = (undoCount - 1) & (MAX_UNDO - 1);
     UndoInfo &undo = undoStack[undoCount];
 
-    // Revert hash for side, castling, and en passant.
     zobristKey ^= sideKey;
     zobristKey ^= castlingKeys[castlingRights] ^ castlingKeys[undo.prevCastlingRights];
     zobristKey ^= epKey(enPassantSquare) ^ epKey(undo.prevEnPassantSquare);
 
-    // Revert state fields.
     castlingRights = undo.prevCastlingRights;
     enPassantSquare = undo.prevEnPassantSquare;
     halfmoveClock = undo.prevHalfmoveClock;
@@ -354,8 +346,8 @@ void Position::undo_move(Move move)
 
     if (move.isCastling())
     {
-        // Take king and rook off their castling squares before restoring them
-        // (Chess960: the two may have swapped, or the king may not have moved).
+        // Remove the king and rook from their castling squares before restoring
+        // them. In Chess960 they may have swapped or the king may not have moved.
         removePiece(castlingKingTo(move));
         removePiece(castlingRookTo(move));
         putPiece(makePiece(us, KING), from);
@@ -363,7 +355,6 @@ void Position::undo_move(Move move)
         return;
     }
 
-    // Remove moved piece from destination and restore any captured piece.
     removePiece(to);
     if (move.isEnPassant())
     {
@@ -373,7 +364,6 @@ void Position::undo_move(Move move)
     else if (undo.capturedPiece != NO_PIECE)
         putPiece(undo.capturedPiece, to);
 
-    // Restore the moving piece at its origin.
     putPiece(undo.movedPiece, from);
 }
 
@@ -381,7 +371,6 @@ void Position::do_null_move()
 {
     initZobrist();
 
-    // Save state for unmake.
     UndoInfo &undo = undoStack[undoCount];
     undoCount = (undoCount + 1) & (MAX_UNDO - 1);
     undo.prevEnPassantSquare = enPassantSquare;
@@ -393,7 +382,6 @@ void Position::do_null_move()
     ++halfmoveClock;
     sideToMove = static_cast<Color>(sideToMove ^ 1);
 
-    // Hash: flip side and clear the en passant square.
     zobristKey ^= sideKey ^ epKey(undo.prevEnPassantSquare);
 
     historyStart = historyCount;
@@ -412,7 +400,6 @@ void Position::undo_null_move()
     historyCount = undo.prevHistoryCount;
     historyStart = undo.prevHistoryStart;
 
-    // Hash: flip side back and restore the en passant square.
     zobristKey ^= sideKey ^ epKey(enPassantSquare);
 }
 
@@ -424,16 +411,17 @@ bool Position::isRepetition(int ply) const
     const int from = oldest > historyStart ? oldest : historyStart;
     int gameMatches = 0;
 
-    // Same side to move recurs every two plies; the previous one is two
-    // entries behind the current position (which sits at historyCount - 1).
+    // The same side recurs every two plies, so start two entries back.
     for (int i = historyCount - 3; i >= from; i -= 2)
     {
         if (historyKeys[i & (MAX_HISTORY - 1)] != key)
             continue;
+        // A second occurrence inside the search is a repetition.
         if (i >= rootCount)
-            return true; // second occurrence inside the search
+            return true;
+        // Two earlier matches make a threefold repetition.
         if (++gameMatches >= 2)
-            return true; // threefold against game history
+            return true;
     }
 
     return false;
@@ -446,7 +434,7 @@ bool Position::set_fen(const std::string &fen)
     if (!(ss >> boardStr >> sideStr >> castlingStr >> epStr))
         return false;
 
-    // The halfmove clock and the fullmove number are optional in UCI.
+    // The halfmove clock and fullmove number are optional in UCI.
     if (!(ss >> halfmoveStr))
         halfmoveStr = "0";
     if (!(ss >> fullmoveStr))
@@ -455,7 +443,6 @@ bool Position::set_fen(const std::string &fen)
     initZobrist();
     clear();
 
-    // 1. Piece placement, ranks 8 down to 1.
     int rank = RANK_8;
     int file = FILE_A;
     for (char c : boardStr)
@@ -485,7 +472,6 @@ bool Position::set_fen(const std::string &fen)
     if (rank != RANK_1 || file != FILE_NB)
         return false;
 
-    // 2. Side to move.
     if (sideStr == "w")
         sideToMove = WHITE;
     else if (sideStr == "b")
@@ -493,9 +479,8 @@ bool Position::set_fen(const std::string &fen)
     else
         return false;
 
-    // 3. Castling rights. Both the classical letters and the Chess960 file
-    //    letters are accepted: "KQkq" (rook on the outermost file of its side)
-    //    and "HAha" or "GBgb" (Shredder-FEN, the rook's own file).
+    // Accept both classical and Chess960 castling letters. Classical rights
+    // name the side, while Shredder-FEN letters name the rook file.
     if (castlingStr != "-")
     {
         for (char c : castlingStr)
@@ -548,9 +533,8 @@ bool Position::set_fen(const std::string &fen)
                 return false;
             }
 
-            // The rook castles towards the king side when it starts right of
-            // the king; that - not the letter itself - picks the right.
             const Square ksq = kingSquare(color);
+            // A rook right of the king determines the side, not the letter itself.
             const CastlingSide side = (ksq != SQ_NONE && rookSq < ksq) ? QUEEN_SIDE : KING_SIDE;
 
             castlingRights |= castlingRight(color, side);
@@ -558,7 +542,6 @@ bool Position::set_fen(const std::string &fen)
         }
     }
 
-    // 4. En passant target square.
     if (epStr == "-")
     {
         enPassantSquare = SQ_NONE;
@@ -584,7 +567,6 @@ bool Position::set_fen(const std::string &fen)
             enPassantSquare = SQ_NONE;
     }
 
-    // 5. Halfmove clock and fullmove number.
     try
     {
         halfmoveClock = std::stoi(halfmoveStr);
@@ -600,12 +582,11 @@ bool Position::set_fen(const std::string &fen)
     halfmoveClock = std::min(halfmoveClock, 1000000);
     fullmoveNumber = std::min(fullmoveNumber, 1000000);
 
-    // Finalize the Zobrist key with side, castling, and en passant components.
     zobristKey ^= sideToMove == BLACK ? sideKey : 0;
     zobristKey ^= castlingKeys[castlingRights];
     zobristKey ^= epKey(enPassantSquare);
 
-    // Reset repetition history to just this position.
+    // Repetition history starts with only this position.
     historyCount = 1;
     historyStart = 0;
     historyKeys[0] = zobristKey;

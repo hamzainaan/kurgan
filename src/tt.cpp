@@ -78,7 +78,7 @@ namespace
 #endif
     }
 
-    // A proven mate is a property of the position, not of the search that found it.
+    // A proven mate belongs to the position, not to the search that found it.
     bool protectedMate(const tt::Entry &e, uint64_t stored, int bound)
     {
         return e.bound() == tt::BOUND_EXACT && e.mate() && e.age(generation) < MATE_PROTECT_AGE
@@ -87,7 +87,6 @@ namespace
 
     void save(tt::Entry &e, uint64_t stored, Move move, int score, int depth, int bound, int ply, int eval, bool pv)
     {
-        // Store mix.
         if (bound == tt::BOUND_EXACT)
             ++stats::current().ttStoresExact;
         else if (bound == tt::BOUND_LOWER)
@@ -163,7 +162,7 @@ tt::Entry *tt::probe(uint64_t key)
     stats::Tally &tally = stats::current();
     ++tally.ttProbes;
 
-    // A different key in an occupied cluster is an index collision, an empty cluster is simply a miss.
+    // An occupied cluster without a matching key counts as a collision.
     const uint64_t stored = key ^ keySalt;
     bool occupied = false;
     for (Entry &e : table[key & clusterMask].entry)
@@ -192,7 +191,7 @@ void tt::store(uint64_t key, Move move, int score, int depth, int bound, int ply
     const uint64_t stored = key ^ keySalt;
     Cluster &cluster = table[key & clusterMask];
 
-    // The entry already holding this position wins over an empty slot.
+    // Refresh an existing entry before considering an empty slot.
     Entry *freeSlot = nullptr;
     for (Entry &e : cluster.entry)
     {
@@ -212,7 +211,6 @@ void tt::store(uint64_t key, Move move, int score, int depth, int bound, int ply
         return;
     }
 
-    // The cluster is full with other positions.
     Entry *victim = nullptr;
     int worst = 0;
     for (Entry &e : cluster.entry)

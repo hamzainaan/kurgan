@@ -5,7 +5,7 @@
 
 namespace
 {
-    // All squares whose piece attacks 'to', both colors, given occupancy.
+    // Returns all pieces attacking a square under the given occupancy.
     Bitboard attackersTo(const Position &pos, Square to, Bitboard occ)
     {
         const Bitboard b = 1ULL << to;
@@ -34,17 +34,16 @@ int see::evaluate(const Position &pos, Move m)
     const Color us = pos.sideToMove;
     const Color them = static_cast<Color>(us ^ 1);
 
-    // Value of the piece captured by the move (en passant captures a pawn).
+    // Value of the captured piece, with en passant treated as a pawn capture.
     int swap[32] = {};
     swap[0] = m.isEnPassant() ? pieceValue(PAWN) : pieceValue(typeOf(pos.board[to]));
 
-    // Piece now standing on 'to' (a promoting pawn becomes the promotion piece).
+    // Piece standing on the target after the move, including any promotion.
     PieceType onTo = m.isPromotion() ? m.promoType() : typeOf(pos.board[from]);
     if (m.isPromotion())
         swap[0] += pieceValue(m.promoType()) - pieceValue(PAWN);
 
-    // Occupancy after the move: the mover leaves 'from' and lands on 'to';
-    // the captured en passant pawn is removed.
+    // Occupancy after the move, with en passant removing the capturable pawn.
     Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
     occ ^= 1ULL << from;
     occ |= 1ULL << to;
@@ -62,7 +61,7 @@ int see::evaluate(const Position &pos, Move m)
         if (!sideAttackers)
             break;
 
-        // Least valuable attacker captures first (PAWN..KING).
+        // Take with the least valuable attacker first.
         int pt = PAWN;
         for (int t = PAWN; t <= static_cast<int>(KING); ++t)
         {
@@ -81,7 +80,7 @@ int see::evaluate(const Position &pos, Move m)
 
         occ &= ~(1ULL << atkSq);
 
-        // Removing the attacker may reveal an X-ray slider behind it.
+        // Removing an attacker can reveal a slider behind it.
         if (pt == PAWN || pt == BISHOP || pt == QUEEN)
             attackers |= movegen::attacks(BISHOP, to, occ) & occ &
                          (pos.byType[BISHOP] | pos.byType[QUEEN]);
@@ -95,7 +94,7 @@ int see::evaluate(const Position &pos, Move m)
         side = static_cast<Color>(side ^ 1);
     }
 
-    // Negamax the swap list from the tail back to the root capture.
+    // Negamax the swap list from the last capture back to the root.
     while (--d >= 0)
         swap[d] = -std::max(-swap[d], swap[d + 1]);
 

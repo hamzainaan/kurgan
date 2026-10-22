@@ -6,12 +6,12 @@
 
 namespace perft
 {
-    // Count leaf nodes of the legal move tree to the given depth.
+    // Counts legal leaf nodes to the given depth.
     uint64_t nodes(Position &pos, int depth);
 
-    // Print per-root-move node counts followed by the total.
+    // Prints per-root-move node counts and the total.
     void divide(Position &pos, int depth);
 
-    // Run the built-in perft suite against known values; returns true on success.
+    // Runs the built-in perft suite and returns true on success.
     bool suite();
 }

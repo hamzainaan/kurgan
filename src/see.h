@@ -4,11 +4,9 @@
 
 namespace see
 {
-    // Static Exchange Evaluation: the net material gain in centipawns of 'm'
-    // from the point of view of the side to move. Positive values are good for
-    // the mover. A quiet move into an attacked square yields a negative value.
+    // Returns the static exchange evaluation in centipawns from the mover's side.
     int evaluate(const Position &pos, Move m);
 
-    // True when evaluate(pos, m) >= threshold. Used for SEE-based pruning.
+    // Checks whether the static exchange evaluation meets a threshold.
     bool ge(const Position &pos, Move m, int threshold);
 }

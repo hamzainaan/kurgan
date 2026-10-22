@@ -26,7 +26,7 @@ namespace
     constexpr int MAX_DEPTH = 128;
     constexpr int FULL_WIDTH_DEPTH = 3;
 
-    // Runtime-tunable pruning parameters, exposed as UCI spin options.
+    // Search parameters exposed as UCI spin options.
     struct TuningParam
     {
         const char *name;
@@ -74,7 +74,6 @@ namespace
         {"History Bonus Max", &tuned::HIST_BONUS_MAX, 256, 16384},
     };
 
-    // Transposition table bounds.
     constexpr int MATE = tt::MATE;
     constexpr int MATE_THRESHOLD = tt::MATE_THRESHOLD;
     constexpr int INTERNAL_PAWN = tuned::MATERIAL[PAWN];
@@ -94,10 +93,8 @@ namespace
     constexpr int BOUND_UPPER = tt::BOUND_UPPER;
     constexpr int NO_EVAL = tt::NO_EVAL;
 
-    // Frequently accessed atomics are isolated on separate cache lines to
-    // avoid false sharing: without this, a thread writing to a counter would
-    // invalidate the cache line holding stopFlag (read at every node) and
-    // per-thread throughput (and reported nps) would drop as threads grow.
+    // Keep frequently written atomics on separate cache lines. False sharing
+    // would invalidate the line holding stopFlag and reduce throughput.
     alignas(64) std::atomic<bool> stopFlag{false};
     alignas(64) std::atomic<uint64_t> searchedNodes{0};
     alignas(64) std::atomic<uint64_t> globalNodes{0};
@@ -138,15 +135,14 @@ namespace
     thread_local int history[COLOR_NB][SQUARE_NB][SQUARE_NB];
     thread_local int captureHistory[PIECE_NB][SQUARE_NB][PIECE_TYPE_NB];
 
-    // Continuation history
     constexpr int CONT_PLIES = 4;
     constexpr int CONT_DISTANCE[CONT_PLIES] = {1, 2, 4, 6};
     constexpr int CONT_WEIGHT[CONT_PLIES] = {2, 2, 1, 1};
     constexpr int CONT_WEIGHT_SUM = 6;
     constexpr int PIECE_TO_NB = static_cast<int>(PIECE_NB) * static_cast<int>(SQUARE_NB);
     constexpr int PAWN_HISTORY_NB = 4096;
-    constexpr int CONT_SCALE = 100; // percent of the continuation term
-    constexpr int PAWN_SCALE = 100; // percent of the pawn-history term
+    constexpr int CONT_SCALE = 100;
+    constexpr int PAWN_SCALE = 100;
     constexpr size_t CONT_ENTRIES = static_cast<size_t>(CONT_PLIES) * PIECE_TO_NB * PIECE_TO_NB;
     constexpr size_t PAWN_ENTRIES = static_cast<size_t>(PAWN_HISTORY_NB) * PIECE_TO_NB;
     constexpr size_t COUNTER_ENTRIES = static_cast<size_t>(COLOR_NB) * SQUARE_NB * SQUARE_NB;
@@ -156,12 +152,12 @@ namespace
     constexpr size_t PAWN_CORR_ENTRIES = static_cast<size_t>(COLOR_NB) * CORR_NB;
     constexpr size_t NON_PAWN_CORR_ENTRIES = static_cast<size_t>(COLOR_NB) * COLOR_NB * CORR_NB;
     std::mutex historyMutex;
-    std::vector<std::vector<int16_t>> contSlices; // one slice per worker slot
+    std::vector<std::vector<int16_t>> contSlices;
     std::vector<std::vector<int16_t>> pawnSlices;
     std::vector<std::vector<Move>> counterSlices;
     std::vector<std::vector<int16_t>> pawnCorrSlices;
     std::vector<std::vector<int16_t>> nonPawnCorrSlices;
-    thread_local int16_t *contHistory = nullptr; // this worker's slice
+    thread_local int16_t *contHistory = nullptr;
     thread_local int16_t *pawnHistory = nullptr;
     thread_local Move *counterMoves = nullptr;
     thread_local int16_t *pawnCorr = nullptr;
@@ -180,6 +176,7 @@ namespace
     thread_local Move partialPonder;
     int lmrTable[MAX_DEPTH][64];
 
+    // Helper threads skip depths in staggered patterns to diversify the search.
     constexpr int SKIP_PATTERNS = 20;
     constexpr int SKIP_SIZE[SKIP_PATTERNS] = {1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4};
     constexpr int SKIP_PHASE[SKIP_PATTERNS] = {0, 1, 0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6, 7};
@@ -191,14 +188,12 @@ namespace
                 lmrTable[d][m] = static_cast<int>(tuned::LMR_BASE / 100.0 + std::log(d) * std::log(m) * 100.0 / tuned::LMR_DIVISOR);
     }
 
-    // Hardware concurrency of the machine the engine is running on.
     int hardwareThreads()
     {
         const unsigned n = std::thread::hardware_concurrency();
         return n < 1 ? 1 : static_cast<int>(n);
     }
 
-    // True when neither side has mating material.
     bool isInsufficientMaterial(const Position &pos)
     {
         if (pos.byType[PAWN] || pos.byType[ROOK] || pos.byType[QUEEN])
@@ -209,16 +204,16 @@ namespace
         const int knights = popCount(pos.byType[KNIGHT]);
         const int bishops = popCount(pos.byType[BISHOP]);
 
-        // K vs K, or K + one minor vs K.
+        // Lone kings or a single minor piece cannot mate.
         if (knights + bishops <= 1)
             return true;
 
-        // K + two knights vs K cannot force mate.
+        // Two knights cannot force mate against a lone king.
         if (knights == 2 && bishops == 0 &&
             (popCount(minors & pos.byColor[WHITE]) == 2 || popCount(minors & pos.byColor[BLACK]) == 2))
             return true;
 
-        // All bishops on the same color square.
+        // Bishops confined to one color complex cannot mate.
         if (knights == 0 && bishops >= 2)
         {
             const Bitboard b = pos.byType[BISHOP];
@@ -237,9 +232,7 @@ namespace
 
     void checkTime()
     {
-        // Accumulate the node bucket flushed by the caller. Doing it here (and
-        // not per node) keeps writes to the shared counter infrequent, and it
-        // lets quiescence and alpha-beta nodes be counted uniformly.
+        // The caller flushed a 2048-node batch, so shared counter writes stay rare.
         searchedNodes.fetch_add(2048, std::memory_order_relaxed);
 
         if (stopFlag.load(std::memory_order_relaxed))
@@ -256,7 +249,7 @@ namespace
 
         if (ponderFlag.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed))
         {
-            // Ponder search must not answer before ponderhit or stop.
+            // A ponder search must not answer before ponderhit or stop.
             manager::postpone();
             return;
         }
@@ -267,7 +260,7 @@ namespace
         stopFlag.store(true, std::memory_order_relaxed);
     }
 
-    // The captured piece, treating en passant as capturing a pawn.
+    // Returns the captured piece, treating en passant as a pawn capture.
     Piece victimOf(const Position &pos, Move m)
     {
         return m.isEnPassant() ? makePiece(static_cast<Color>(pos.sideToMove ^ 1), PAWN)
@@ -319,7 +312,7 @@ namespace
         return score;
     }
 
-    // History entries are bounded to [-HISTORY_MAX, HISTORY_MAX].
+    // History values stay within plus or minus HISTORY_MAX.
     constexpr int HISTORY_MAX = 16384;
 
     void updateHistory(int &h, int bonus)
@@ -336,13 +329,12 @@ namespace
         h = static_cast<int16_t>(value);
     }
 
-    // Index of a (piece, target) pair inside one history row.
     constexpr int pieceToIndex(Piece piece, Square to)
     {
         return static_cast<int>(piece) * static_cast<int>(SQUARE_NB) + static_cast<int>(to);
     }
 
-    // Attach this worker to its history slice, allocating it on first use.
+    // Attaches this worker to its history slice, allocating it on first use.
     void acquireHistorySlices()
     {
         if (contHistory != nullptr)
@@ -464,7 +456,7 @@ namespace
     {
         int score;
         Move move;
-        uint16_t order; // generation index, used as a stable tie-break
+        uint16_t order; // Generation index used as a stable tie-break.
         int history;
     };
 
@@ -492,8 +484,8 @@ namespace
         int deferredCount = 0;
         int deferredIndex = 0;
         Move ttMove{};
-        int lastSee = 0;          // SEE of the move returned by the last next()
-        bool lastSeeValid = false; // false when SEE was not evaluated for it
+        int lastSee = 0;           // Result of the SEE test for the last returned move.
+        bool lastSeeValid = false; // False when SEE was not evaluated for the move.
         bool qsearch = false;
         int lastHistory = 0;
 
@@ -549,7 +541,7 @@ namespace
             }
         }
 
-        // Next move to search, or Move() when the node is exhausted.
+        // Returns the next move to search, or Move when the node is exhausted.
         Move next(const Position &pos)
         {
             while (index < count)
@@ -574,8 +566,7 @@ namespace
 
             if (deferredIndex < deferredCount)
             {
-                // Every deferred move was rejected by SEE, so the score is
-                // known to be negative without re-running the evaluation.
+                // Deferred moves failed the SEE test, so lastSee is known negative.
                 lastSee = -1;
                 lastSeeValid = true;
                 lastHistory = deferred[deferredIndex].history;
@@ -662,7 +653,6 @@ namespace
 
     int quiescence(Position &pos, int alpha, int beta, int ply);
 
-    // True when the side to move is checkmated.
     bool isCheckmated(Position &pos)
     {
         const Color us = pos.sideToMove;
@@ -679,7 +669,7 @@ namespace
         return true;
     }
 
-    // First legal move in pseudo-legal generation order, or Move() if there is none.
+    // Returns the first legal move in generation order, or Move when none exists.
     Move firstLegalMove(const Position &pos)
     {
         MoveList list;
@@ -693,6 +683,7 @@ namespace
         return Move();
     }
 
+    // Verifies a table mate score by replaying a forced mate.
     bool hasMateProof(Position &pos, int ply, int score)
     {
         const int need = (score > 0 ? MATE - score : MATE + score) - ply;
@@ -725,7 +716,7 @@ namespace
 
                 if (pos.sideToMove == mated && isCheckmated(pos))
                 {
-                    // Leave the move applied: the undo loop below pops it.
+                    // Keep the mating move applied so the undo loop removes it.
                     pvTable[ply][ply + n] = m;
                     ++n;
                     break;
@@ -752,9 +743,8 @@ namespace
 
     int alphaBeta(Position &pos, int depth, int alpha, int beta, int ply, bool pvNode, bool cutNode)
     {
-        // Every node owns exactly one PV slot. Reset it before any early
-        // return so a parent never copies moves left over at this ply by an
-        // earlier search (which would print an illegal principal variation).
+        // Each node owns one PV slot. Reset it before any early return so a
+        // parent cannot copy stale moves into its line.
         pvLength[ply] = ply;
 
         if (ply >= MAX_PLY - 1)
@@ -768,7 +758,7 @@ namespace
         if (ply > seldepth)
             seldepth = ply;
 
-        // Mate distance pruning
+        // Apply mate distance pruning to the search window.
         if (alpha < -MATE + ply)
             alpha = -MATE + ply;
         if (beta > MATE - ply - 1)
@@ -787,7 +777,6 @@ namespace
         if (ply > 0 && (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos) || pos.isRepetition(ply)))
             return drawScore(pos) + 1 - static_cast<int>(nodes & 2);
 
-        // Transposition table probe.
         const tt::Entry *tte = excluded == Move() ? tt::probe(key) : nullptr;
         const bool ttHit = tte != nullptr;
         Move ttMove{};
@@ -924,7 +913,7 @@ namespace
             }
         }
 
-        // Thanks to the Xiphos
+        // ProbCut follows the Xiphos implementation.
         const int probcutBeta = beta + tuned::PROBCUT_MARGIN;
         if (!pvNode && !inCheck && !mateWindow && excluded == Move() && depth >= tuned::PROBCUT_DEPTH &&
             probcutBeta < MATE_THRESHOLD && !(ttHit && ttDepth >= depth - 3 && ttScore < probcutBeta))
@@ -1253,8 +1242,7 @@ namespace
     {
         ++stats::current().qnodes;
 
-        // As in alphaBeta: a node that returns immediately must not leave a
-        // stale PV behind for its parent to copy.
+        // As in alphaBeta, reset the PV slot before any early return.
         pvLength[ply] = ply;
 
         if (ply >= MAX_PLY - 1)
@@ -1395,8 +1383,7 @@ namespace
         return bestScore;
     }
 
-    // Search the root at the given depth, re-searching with a widening
-    // aspiration window around prevScore on fail-low/fail-high.
+    // Searches the root at the given depth, widening the aspiration window after a fail.
     int aspirationSearch(Position &pos, int depth, int prevScore)
     {
         constexpr int INITIAL_DELTA = 16;
@@ -1406,7 +1393,7 @@ namespace
         int alpha = -INF;
         int beta = INF;
 
-        // Only start with a narrow window for stable, non-mate scores.
+        // Skip the narrow window for mate scores and shallow depths.
         if (depth >= ASPIRATION_MIN_DEPTH && prevScore > -MATE_THRESHOLD && prevScore < MATE_THRESHOLD)
         {
             alpha = std::max(-INF, prevScore - delta);
@@ -1440,7 +1427,7 @@ namespace
                 }
                 if (isMain)
                     manager::rootFailing(true);
-                // Fail-low: lower alpha and tighten beta toward the true value.
+                // On a fail-low, lower alpha and tighten beta toward the score.
                 beta = (alpha + beta) / 2;
                 alpha = (score <= -MATE_THRESHOLD) ? -INF : std::max(-INF, score - delta);
             }
@@ -1535,7 +1522,7 @@ namespace
         excludedRootMoves.clear();
         stats::current() = stats::Tally{};
 
-        // A root without a single legal move (checkmate/stalemate) has nothing to search
+        // Checkmate or stalemate at the root leaves nothing to search.
         const bool rootHasLegalMove = firstLegalMove(pos) != Move();
 
         const bool isMain = (workerId == 0);
@@ -1566,7 +1553,6 @@ namespace
         int previousScore = 0;
         int lastCompletedScore = 0;
 
-        // Dynamic time management state
         Move stableMove{};
         int stableIterations = 0;
         int scoreDrop = 0;
@@ -1627,7 +1613,6 @@ namespace
                 for (int i = 0; i < line.pvLength; ++i)
                     line.pv[i] = pvTable[0][i];
 
-                // Stop once a mate within the requested distance has been found.
                 if (mateGoal > 0 && score >= MATE_THRESHOLD && (MATE - score + 1) / 2 <= mateGoal)
                 {
                     stopFlag.store(true, std::memory_order_relaxed);
@@ -1660,11 +1645,8 @@ namespace
                     const long long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                                                   std::chrono::steady_clock::now() - start)
                                                   .count();
-                    // Report aggregate nodes across all threads so nps scales
-                    // with the thread count instead of reflecting one worker's
-                    // share of the work.
-                    // searchedNodes only advances in 2048-node batches (see
-                    // checkTime), so a shallow search reported "nodes 0".
+                    // Report aggregate nodes plus the unflushed batch so nps scales with
+                    // thread count and shallow searches do not report zero.
                     const uint64_t reported = searchedNodes.load(std::memory_order_relaxed)
                                               + static_cast<uint64_t>(nodes & 2047);
                     for (int i = 0; i < lineCount; ++i)
@@ -1688,7 +1670,6 @@ namespace
             if (stopFlag.load(std::memory_order_relaxed))
                 break;
 
-            // Nothing was searched at this depth.
             if (!rootHasLegalMove)
                 break;
 
@@ -1773,8 +1754,7 @@ void search::prepare(const Position &root, const SearchLimits &limits)
 {
     activeLimits = limits;
 
-    // A searchmoves list without a single legal root move would leave the root
-    // with nothing to search.
+    // A searchmoves list with no legal move would leave the root empty.
     if (!activeLimits.searchmoves.empty())
     {
         std::vector<Move> usable;
@@ -1803,7 +1783,6 @@ void search::prepare(const Position &root, const SearchLimits &limits)
     activeUs = root.sideToMove;
     nodesLimit = limits.nodes;
     mateGoal = limits.mate;
-    // Never ponder unless it has been enabled.
     ponderFlag.store(limits.ponder && ponderSetting, std::memory_order_relaxed);
     ponderHitFlag.store(false, std::memory_order_relaxed);
     stopFlag.store(false, std::memory_order_relaxed);
@@ -1813,7 +1792,7 @@ void search::prepare(const Position &root, const SearchLimits &limits)
 
 void search::go(const Position &root, const SearchLimits &limits)
 {
-    // Lazily initialize the attack tables and transposition table if needed.
+    // Initialize attack tables and the transposition table on first use.
     if (!tt::allocated())
     {
         movegen::init();
@@ -1831,7 +1810,6 @@ void search::go(const Position &root, const SearchLimits &limits)
     tt::newSearch();
     searchCpuStart = std::clock();
 
-    // A reporting search starts from an empty record set.
     if (stats::reporting())
         stats::clearRecords();
 
@@ -1901,7 +1879,7 @@ void search::setHashSize(int megabytes)
     if (megabytes == hashSizeMb)
         return;
 
-    // The table is allocated lazily; only a live table can fail to grow.
+    // The table is allocated lazily, so only a live table can fail to grow.
     if (!tt::allocated())
     {
         hashSizeMb = megabytes;

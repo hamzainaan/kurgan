@@ -2,7 +2,7 @@
 
 namespace bench
 {
-    // Run a deterministic fixed-depth search over a built-in position set.
-    // 'depth' <= 0 selects the default depth.
+    // Runs a deterministic fixed-depth search over built-in positions. A depth
+    // of zero or less selects the default.
     void run(int depth);
 }

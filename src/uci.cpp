@@ -78,8 +78,7 @@ namespace
         opponent.name = name;
     }
 
-    // Convert a UCI move string ("e2e4", "e7e8q") into a Move by matching the
-    // pseudo-legal move list of the current position.
+    // Matches a UCI move string against the pseudo-legal move list.
     Move parseMove(const Position &pos, const std::string &s)
     {
         if (s.size() < 4)
@@ -188,7 +187,6 @@ namespace
                 fen += part;
             }
 
-            // A rejected FEN used to leave the previous position.
             if (!pos.set_fen(fen))
                 std::cout << "info string invalid fen '" << fen << '\'' << std::endl;
         }
@@ -206,7 +204,6 @@ namespace
                 const Move m = parseMove(pos, moveStr);
                 if (m.from() == m.to())
                 {
-                    // Never stop silently
                     std::cout << "info string invalid move '" << moveStr << '\'' << std::endl;
                     break;
                 }
@@ -260,7 +257,6 @@ namespace
                     else
                         limits.searchmoves.push_back(m);
                 }
-                // Say so out loud, because the caller asked for one.
                 if (requested > 0 && limits.searchmoves.empty())
                     std::cout << "info string no legal searchmoves, searching all moves" << std::endl;
             }

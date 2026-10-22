@@ -14,7 +14,6 @@
 
 namespace
 {
-    // --- Bit utilities and geometry ---
     constexpr Bitboard FILE_A_BB = 0x0101010101010101ULL;
     constexpr Bitboard RANK_1_BB = 0x00000000000000FFULL;
     constexpr Bitboard RANK_4_BB = RANK_1_BB << 24;
@@ -34,7 +33,7 @@ namespace
     constexpr Bitboard HALF_BB[COLOR_NB] = {0x00000000FFFFFFFFULL, 0xFFFFFFFF00000000ULL};
     constexpr Bitboard LIGHT_SQ_BB = 0x55AA55AA55AA55AAULL;
 
-    // King safety zones, indexed by the colour that owns the king.
+    // King safety zones are indexed by the color that owns the king.
     constexpr Bitboard KING_ZONE_DEFENDER[COLOR_NB] = {
         HALF_BB[WHITE] | (RANK_1_BB << 32),
         (RANK_1_BB << 24) | HALF_BB[BLACK],
@@ -123,12 +122,11 @@ namespace
         return df > dr ? df : dr;
     }
 
-    // Piece-type order used by the per-square evaluation terms.
     constexpr PieceType mobilityTypes[4] = {KNIGHT, BISHOP, ROOK, QUEEN};
     constexpr PieceType outpostTypes[2] = {KNIGHT, BISHOP};
 
-    // Feature layout of tuned::MG_MINOR / tuned::MG_ROOK, shared with the
-    // featuriser in tuner/minor_piece.py and tuner/rook.py.
+    // Feature layout of MG_MINOR and MG_ROOK in tuned_params.h, mirrored by
+    // the featurizers in tuner/minor_piece.py and tuner/rook.py.
     constexpr int MINOR_BISHOP_PAIR = 0;
     constexpr int MINOR_BISHOP_PAWNS = 1;
     constexpr int MINOR_KNIGHT_RIM = 10;
@@ -156,9 +154,8 @@ namespace
     constexpr int THREAT_ON_QUEEN_BISHOP = 20;
     constexpr int THREAT_ON_QUEEN_ROOK = 21;
 
-    // Per-piece attack sets, plus the unions the king-safety term needs. Laser
-    // iterates pieces (not piece types) so that two pieces of the same type both
-    // count towards `kingAttackPieces` and `kingAttackPts`.
+    // Pieces are stored individually so duplicate piece types both count for
+    // king safety.
     constexpr int MAX_ATTACK_PIECES = 20;
 
     struct AttackInfo
@@ -229,16 +226,15 @@ namespace
                 const int rank = sq >> 3;
                 const int relRank = (c == WHITE) ? rank : 7 - rank;
 
-                // Only ranks 3..6 (own perspective) can hold an outpost.
+                // An outpost must be on ranks 3 through 6 from its own side.
                 if (relRank < 3 || relRank > 6)
                     continue;
 
-                // Must be defended by one of our own pawns.
+                // The square must be defended by a friendly pawn.
                 if (!(movegen::pawnAttacksFrom(them, sq) & ownPawns))
                     continue;
 
-                // Reject if an enemy pawn on an adjacent file can still reach
-                // a square from which it would attack this one.
+                // Reject the square when an enemy pawn can still advance to attack it.
                 if (enemyPawns & (fileMask(file - 1) | fileMask(file + 1)) & ranksAhead(c, rank))
                     continue;
 
@@ -384,8 +380,7 @@ namespace
                 else
                     ++free;
 
-                // The enemy king needs `squareDistance` king moves to reach the
-                // promotion square
+                // The pawn wins the race when the enemy king needs more moves than the pawn.
                 if (theirKing != SQ_NONE
                     && squareDistance(theirKing, promotionSquare(c, sq)) > 7 - relRank)
                     ++winsRace;
@@ -468,7 +463,7 @@ namespace
                 eg += tuned::EG_ROOK[ROOK_SEMI_OPEN_FILE];
             }
 
-            // The 7th is worth most when it cuts the king off or eats pawns.
+            // A seventh-rank rook is strongest when it cuts off the king or attacks pawns.
             if (relRank == 6 && ((theirKing & theirBackRank) || (enemyPawns & theirSeventhRank)))
             {
                 mg += tuned::MG_ROOK[ROOK_ON_7TH];
@@ -481,7 +476,6 @@ namespace
                 eg += tuned::EG_ROOK[ROOK_ON_2ND];
             }
 
-            // Rook behind one of our own passers, and behind one of theirs.
             if (passed[c] & fileMask(file) & ranksAhead(c, rank))
             {
                 mg += tuned::MG_ROOK[ROOK_BEHIND_OWN_PASSER];
@@ -644,7 +638,7 @@ namespace
         return tuned::KS_BISHOP_PRESSURE * (c * (c + 1) / 2 - 1);
     }
 
-    // Danger `attacker`'s pieces pose around `defender`'s king.
+    // Scores the danger the attacking side poses around the defending king.
     int kingAttackScore(const Position &pos, const AttackInfo &ai, Bitboard occ,
                         const int counts[COLOR_NB][PIECE_TYPE_NB], Color attacker, int pawnScore)
     {
@@ -765,7 +759,6 @@ int evaluate::hce(const Position &pos)
     int mg[COLOR_NB] = {0, 0};
     int eg[COLOR_NB] = {0, 0};
 
-    // Material and piece-square tables (tapered).
     for (int c = WHITE; c <= BLACK; ++c)
     {
         for (int pt = PAWN; pt <= KING; ++pt)
@@ -781,10 +774,8 @@ int evaluate::hce(const Position &pos)
         }
     }
 
-    // Per-square terms, resolved separately for both phases.
     const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
 
-    // Piece counts, consumed only by the material-imbalance term.
     int counts[COLOR_NB][PIECE_TYPE_NB] = {};
     for (int c = WHITE; c <= BLACK; ++c)
         for (int pt = PAWN; pt <= QUEEN; ++pt)
@@ -833,7 +824,7 @@ int evaluate::hce(const Position &pos)
         mg[c] += ks;
     }
 
-    // Game phase: 0 (endgame) .. 24 (midgame).
+    // Game phase runs from 0 in the endgame to 24 in the middlegame.
     int phase = popCount(pos.byType[KNIGHT] | pos.byType[BISHOP]) + 2 * popCount(pos.byType[ROOK]) + 4 * popCount(pos.byType[QUEEN]);
     if (phase > 24)
         phase = 24;
@@ -846,7 +837,7 @@ int evaluate::hce(const Position &pos)
     return stmScore + tuned::TEMPO;
 }
 
-#endif // KURGAN_HCE_OFF
+#endif
 
 namespace
 {

@@ -5,9 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
-// Transposition table: 4-entry clusters addressed by the low key bits, with a
-// depth/age replacement policy. A cluster is exactly one cache line, so a
-// probe costs a single miss and the victim search never leaves that line.
+// Four-entry clusters share a cache line and use depth and age for replacement.
 namespace tt
 {
     constexpr int MATE = 32000;
@@ -29,7 +27,7 @@ namespace tt
         int16_t score = 0;
         int16_t eval = NO_EVAL;
         uint8_t depthPv = 0;
-        // 6-bit write generation | 2-bit bound.
+        // Six bits of write generation followed by two bits of bound.
         uint8_t genBound = 0;
 
         bool empty() const { return bound() == BOUND_NONE; }
@@ -49,6 +47,7 @@ namespace tt
 
     static_assert(sizeof(Cluster) == 64, "a cluster must fit one cache line");
 
+    // Converts mate scores between table storage and the search ply.
     int scoreFromTT(int score, int ply);
     int scoreToTT(int score, int ply);
 
@@ -61,5 +60,6 @@ namespace tt
 
     void store(uint64_t key, Move move, int score, int depth, int bound, int ply, int eval = NO_EVAL, bool pv = false);
 
+    // Returns approximate table usage in parts per thousand.
     int hashfull();
 }

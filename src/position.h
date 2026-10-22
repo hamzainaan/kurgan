@@ -6,11 +6,9 @@
 #include <cstdint>
 #include <string>
 
-// Standard chess starting position.
 inline constexpr const char *START_FEN =
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
-// Castling rights as bit flags.
 enum CastlingRight : uint8_t
 {
     WHITE_OO = 1 << 0,
@@ -19,7 +17,6 @@ enum CastlingRight : uint8_t
     BLACK_OOO = 1 << 3
 };
 
-// Which side the king castles to
 enum CastlingSide : int
 {
     KING_SIDE,
@@ -27,13 +24,11 @@ enum CastlingSide : int
     CASTLING_SIDE_NB = 2
 };
 
-// Right flag that allows color 'c' to castle towards 's'.
 constexpr uint8_t castlingRight(Color c, CastlingSide s)
 {
     return static_cast<uint8_t>(static_cast<uint8_t>(c == WHITE ? WHITE_OO : BLACK_OO) << s);
 }
 
-// Decompose a Piece into its Color and PieceType components.
 constexpr Color colorOf(Piece p)
 {
     return static_cast<Color>(p >> 3);
@@ -51,36 +46,33 @@ class Position
 public:
     Position();
 
-    // Parse a FEN string into the position; returns false on malformed input.
+    // Parses a FEN string and returns false when it is malformed.
     bool set_fen(const std::string &fen);
 
-    // Serialize the current position to a FEN string.
     std::string fen() const;
 
-    // Print an ASCII representation of the board to standard output.
     void print_board() const;
 
-    // Make a move; returns false (without applying it) if the move is illegal.
+    // Applies a move and returns false without changing the position when it is illegal.
     bool do_move(Move move);
 
-    // Unmake the last move made by do_move.
+    // Undoes the last move applied with do_move.
     void undo_move(Move move);
 
-    // Make/unmake a null move (pass the turn without moving a piece).
     void do_null_move();
     void undo_null_move();
 
-    // True if the current position repeats on the path; 'ply' is the current
-    // search ply (0 at the root) used to distinguish game and search history.
+    // Checks whether the current position repeats on the search path. The ply
+    // locates the root, so a second occurrence in search draws but game history
+    // needs three.
     bool isRepetition(int ply) const;
 
-    // Bitboards keyed by color, piece type, and piece; plus a square->piece map.
+    // Bitboards by color, piece type and piece, plus a square to piece map.
     std::array<Bitboard, COLOR_NB> byColor{};
     std::array<Bitboard, PIECE_TYPE_NB> byType{};
     std::array<Bitboard, PIECE_NB> byPiece{};
     std::array<Piece, SQUARE_NB> board{};
 
-    // Game state.
     Color sideToMove = WHITE;
     uint8_t castlingRights = 0;
     Square enPassantSquare = SQ_NONE;
@@ -92,7 +84,7 @@ public:
     Square kingSquare(Color c) const;
     std::string castlingString() const;
 
-    // Incrementally maintained Zobrist hash of the position.
+    // Incrementally maintained Zobrist key.
     uint64_t zobristKey = 0;
     uint64_t pawnKey = 0;
     std::array<uint64_t, COLOR_NB> nonPawnKey{};
@@ -115,7 +107,7 @@ private:
     std::array<UndoInfo, MAX_UNDO> undoStack{};
     int undoCount = 0;
 
-    // Position keys since the last irreversible move (used for repetition).
+    // Keys since the last irreversible move, used for repetition detection.
     std::array<uint64_t, MAX_HISTORY> historyKeys{};
     int historyCount = 0;
     int historyStart = 0;

@@ -7,7 +7,6 @@
 
 namespace
 {
-    // Standard perft positions and their reference node counts, indexed by depth.
     struct TestCase
     {
         const char *fen;
@@ -36,7 +35,6 @@ namespace
          4,
          {1, 46, 2079, 89890, 3894594, 164075551, 6923051137ULL}},
 
-        // Chess960 positions
         {"bbqnnrkr/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w HFhf - 0 1",
          4,
          {1, 20, 400, 9006, 201143, 0, 0},
@@ -49,23 +47,22 @@ namespace
          4,
          {1, 21, 441, 10202, 234327, 0, 0},
          true},
-        // King already standing on g1: castling leaves it there, the rook
-        // walks h1 -> f1.
+        // Castling leaves the king on g1 and moves the rook from h1 to f1.
         {"4k3/8/8/8/8/8/8/6KR w H - 0 1",
          6,
          {1, 12, 53, 948, 5571, 102638, 583228},
          true},
-        // King and rook swapping squares (f1 <-> g1).
+        // Castling swaps the king and rook between f1 and g1.
         {"4k3/8/8/8/8/8/8/5KR1 w G - 0 1",
          6,
          {1, 13, 58, 1033, 5689, 105989, 601693},
          true},
-        // Rook starting on the king's destination square.
+        // The rook starts on the king's castling destination.
         {"4k3/8/8/8/8/8/8/1KR5 w C - 0 1",
          6,
          {1, 17, 73, 1303, 7087, 130211, 731357},
          true},
-        // "e1g1" is an ordinary king move here; castling is spelled e1h1/e1a1.
+        // The king move e1g1 is not castling here. Castling is encoded as e1h1 or e1a1.
         {"4k3/8/8/8/8/8/8/R3K2R w HA - 0 1",
          5,
          {1, 26, 112, 3189, 17945, 532933, 0},

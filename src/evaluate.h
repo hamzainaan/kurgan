@@ -4,13 +4,13 @@ class Position;
 
 namespace evaluate
 {
-    // Evaluate the position in centipawns from the side to move's perspective.
-    // Uses the loaded NNUE when there is one, the HCE otherwise.
+    // Evaluates the position in centipawns from the side to move, using NNUE
+    // when it is active and the hand-crafted evaluation otherwise.
     int evaluate(const Position &pos);
 
-    // Classic hand-crafted evaluation
+    // Runs the hand-crafted evaluation.
     int hce(const Position &pos);
 
-    // Which of the two evaluate() uses right now?
+    // Returns the name of the active evaluator.
     const char *name();
 }

@@ -184,7 +184,6 @@ namespace manager
         const int threats = winningCaptures(flipped, false);
 
         rootTension = std::min(1.0, (gains + threats) / TENSION_MOVES);
-        // How much of that tension is the opponent threatening us.
         rootDanger = std::min(1.0, threats / TENSION_MOVES);
     }
 
@@ -355,7 +354,7 @@ namespace manager
     {
         const int swing = scoreDrop < 0 ? -scoreDrop : scoreDrop;
 
-        // The cheap exit is gated.
+        // Keep the easy stop depth anchored near the last completed depth.
         const int stopDepth = std::max(easyStopDepth.load(std::memory_order_relaxed),
                                        previousDepth - DEPTH_ANCHOR_SLACK);
 

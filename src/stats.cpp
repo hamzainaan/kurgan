@@ -153,7 +153,7 @@ std::string stats::report()
     out << "IID        count " << t.iidCount
         << "  nodes " << t.iidNodes << " (" << percent(t.iidNodes, t.nodes) << "% of all)\n";
 
-    // The last three count pruned MOVES, everything else counts nodes.
+    // The last three pruning counters count pruned moves rather than nodes.
     out << "pruning    nmp " << t.nmpCutoffs << " (elig " << t.nmpEligible << ")"
         << "  rfp " << t.rfpCutoffs
         << "  razor " << t.razorCutoffs

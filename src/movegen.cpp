@@ -4,11 +4,9 @@
 
 namespace
 {
-    // Chess960 (Fischer Random) mode: only affects how castling moves are
-    // rendered in (and parsed from) coordinate notation.
+    // Chess960 mode changes only how castling moves are encoded for UCI.
     bool chess960Mode = false;
 
-    // Board geometry masks.
     constexpr Bitboard RANK_1_BB = 0x00000000000000FFULL;
     constexpr Bitboard RANK_2_BB = RANK_1_BB << 8;
     constexpr Bitboard RANK_7_BB = RANK_1_BB << 48;
@@ -17,12 +15,10 @@ namespace
     constexpr Bitboard FILE_A_BB = 0x0101010101010101ULL;
     constexpr Bitboard FILE_H_BB = FILE_A_BB << 7;
 
-    // Pre-computed leaper and pawn attack tables.
     std::array<Bitboard, SQUARE_NB> knightAttacks;
     std::array<Bitboard, SQUARE_NB> kingAttacks;
     std::array<std::array<Bitboard, SQUARE_NB>, COLOR_NB> pawnAttacks;
 
-    // Magic bitboard tables (fancy, variable shift).
     struct Magic
     {
         Bitboard mask;
@@ -34,8 +30,8 @@ namespace
     std::array<Magic, SQUARE_NB> rookMagic;
     std::array<Magic, SQUARE_NB> bishopMagic;
 
-    std::array<Bitboard, 0x19000> rookTable;  // 102400 entries
-    std::array<Bitboard, 0x1480> bishopTable; // 5248 entries
+    std::array<Bitboard, 0x19000> rookTable;
+    std::array<Bitboard, 0x1480> bishopTable;
 
     constexpr uint64_t rookMagics[SQUARE_NB] = {
         0x0780001081400021ULL, 0x0140025004402000ULL, 0x1080200082081000ULL, 0x2580100018000480ULL,
@@ -229,10 +225,8 @@ namespace
         }
     }
 
-    // Same as movegen::squareAttacked, but sliding attacks are resolved with the
-    // supplied occupancy. Castling has to test squares in positions where the
-    // king and/or the castling rook are somewhere else, which no plain
-    // occupancy query can express.
+    // Resolves sliding attacks with the supplied occupancy. Castling tests
+    // positions in which the king or rook has already moved.
     bool squareAttackedWith(const Position &pos, Square sq, Color by, Bitboard occ)
     {
         if (pawnAttacks[static_cast<Color>(by ^ 1)][sq] & pos.byColor[by] & pos.byType[PAWN])
@@ -248,8 +242,7 @@ namespace
         return false;
     }
 
-    // Squares strictly between 'a' and 'b'; both must share a rank (which is
-    // always the case for the squares a castling king or rook travels over).
+    // Returns the squares strictly between two squares on the same rank.
     Bitboard betweenOnRank(Square a, Square b)
     {
         const int lo = a < b ? a : b;
@@ -293,8 +286,7 @@ namespace
 
         if (m.isCastling())
         {
-            // King and rook are lifted before both are put back, so they may
-            // swap squares (Chess960: rook on f1, king on g1, ...).
+            // Lift both pieces before placing them, so they can swap squares in Chess960.
             removePiece(pos, to);
             putPiece(pos, makePiece(us, KING), castlingKingTo(m));
             putPiece(pos, makePiece(us, ROOK), castlingRookTo(m));
@@ -560,8 +552,7 @@ std::string moveToUci(Move m)
 {
     Square to = m.to();
 
-    // Castling is stored as king -> rook; in normal chess the GUI expects
-    // king -> king (e.g. e1g1).
+    // Castling is stored as king to rook. Standard UCI expects the king's final square.
     if (m.isCastling() && !movegen::chess960())
         to = castlingKingTo(m);
 

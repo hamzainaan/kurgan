@@ -41,7 +41,8 @@ int nnue::evaluate(const Position &) { return 0; }
 
 namespace
 {
-    constexpr uint32_t LEGACY_MAGIC = 0x314E4E4B; // "KNN1"
+    // Magic of the legacy KNN1 container.
+    constexpr uint32_t LEGACY_MAGIC = 0x314E4E4B;
 
     struct Network
     {
@@ -55,7 +56,7 @@ namespace
 
     Network *g_net = nullptr;
 
-    // Bumped whenever the loaded network changes: cached accumulators are stale.
+    // Incremented whenever the network changes so cached accumulators go stale.
     uint32_t g_generation = 1;
 
     uint32_t fnv1a(const void *data, size_t size)
@@ -67,8 +68,7 @@ namespace
         return h;
     }
 
-    // A perspective sees the board from its own side, so the black view has the
-    // ranks of every square flipped.
+    // The black perspective flips ranks so each side sees the board from its own view.
     Square perspectiveSquare(int colour, int square)
     {
         return static_cast<Square>(colour == BLACK ? square ^ 56 : square);
@@ -80,8 +80,7 @@ namespace
         return king == SQ_NONE ? SQ_A1 : perspectiveSquare(colour, king);
     }
 
-    // Thirty-two king buckets: eight ranks by four horizontally mirrored file
-    // groups, the bucketing Stockfish's HalfKA_hm uses.
+    // Maps a king square to one of thirty-two rank and mirrored-file buckets.
     int kingBucket(Square sq)
     {
         const int file = sq & 7;
@@ -156,7 +155,7 @@ namespace
     static_assert(nnue::HALF_DIM % TILE == 0);
 #endif
 
-    // Halves are never clamped
+    // Hidden accumulator halves are clipped only when the head reads them.
     void applyRows(int16_t *acc, const Network &net, const int *adds, int addCount, const int *subs, int subCount)
     {
 #if defined(__AVX2__) || defined(__SSE4_1__)
@@ -376,7 +375,7 @@ namespace
         return bucket < 0 ? 0 : (bucket < nnue::OUTPUT_BUCKETS ? bucket : nnue::OUTPUT_BUCKETS - 1);
     }
 
-    // Nearest integer, ties away from zero.
+    // Rounds to the nearest integer, with ties away from zero.
     int64_t roundDiv(int64_t value, int64_t divisor)
     {
         const int64_t half = divisor / 2;

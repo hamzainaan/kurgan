@@ -2,6 +2,6 @@
 
 namespace uci
 {
-    // Run the UCI command loop, reading from stdin until "quit".
+    // Runs the UCI command loop until quit or end of input.
     void loop();
 }

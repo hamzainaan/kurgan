@@ -17,5 +17,6 @@ namespace datagen
         std::string out = "data/selfplay";
     };
 
+    // Generates self-play records with the given options.
     void run(const Options &options);
 }

@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <string>
 
-// Flags packed into the upper four bits of a move.
+// Move flags occupy the upper four bits of the move word.
 enum MoveFlag : uint16_t
 {
     NORMAL = 0,
@@ -20,7 +20,7 @@ enum MoveFlag : uint16_t
     CASTLING = 3 << 14
 };
 
-// A 16-bit move: from (6 bits) | to (6 bits) | flags (4 bits).
+// A move stores from and to in six bits each and flags in four bits.
 struct Move
 {
     uint16_t data;
@@ -85,43 +85,41 @@ struct MoveList
     const Move &operator[](int i) const { return moves[i]; }
 };
 
-// Render a move in coordinate notation ("e2e4", "e7e8q").
+// Renders a move in UCI coordinate notation.
 std::string moveToUci(Move m);
 
 namespace movegen
 {
-    // Build all attack tables. Must be called once before any generation.
+    // Builds all attack tables and must run before move generation.
     void init();
     
+    // Selects Chess960 castling notation for UCI input and output.
     void setChess960(bool enabled);
     bool chess960();
 
-    // True if 'move' (king-from -> rook-from) is a legal castling move in 'pos'.
+    // Checks whether a castling move is legal. The move stores the king origin
+    // and the rook origin, which can differ from their final squares in Chess960.
     bool canCastle(const Position &pos, Move move);
 
-    // Attack bitboard for a non-pawn piece type from a square, given occupancy.
+    // Returns the attacks of a non-pawn piece under the given occupancy.
     Bitboard attacks(PieceType pt, Square sq, Bitboard occupied);
 
-    // Squares attacked by a pawn of color 'c' standing on 'sq'.
     Bitboard pawnAttacksFrom(Color c, Square sq);
 
-    // True if 'sq' is attacked by color 'by'.
     bool squareAttacked(const Position &pos, Square sq, Color by);
 
-    // True if the move captures, promotes or is an en passant capture.
+    // Checks whether a move is a capture, promotion or en passant.
     inline bool isTactical(const Position &pos, Move m)
     {
         return m.isPromotion() || m.isEnPassant()
                || (!m.isCastling() && pos.board[m.to()] != NO_PIECE);
     }
 
-    // Generate all pseudo-legal moves for the side to move.
     void generate_pseudo_legal_moves(const Position &pos, MoveList &list);
 
-    // Same moves as above in the same relative order, but only captures,
-    // promotions and en passant.
+    // Generates the tactical subset in the same relative order as the full generator.
     void generate_tactical_moves(const Position &pos, MoveList &list);
 
-    // True if the pseudo-legal move leaves the mover's king out of check.
+    // Checks whether a pseudo-legal move leaves the king out of check.
     bool is_legal(const Position &pos, Move move);
 }
