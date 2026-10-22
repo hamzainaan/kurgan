@@ -23,6 +23,63 @@ namespace
 {
     constexpr const char *START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
+    struct Opponent
+    {
+        std::string title = "none";
+        int elo = 0;
+        bool computer = true;
+        std::string name;
+    };
+
+    Opponent opponent;
+
+    void setOpponent(const std::string &value)
+    {
+        if (value.empty() || value == "<empty>")
+        {
+            opponent = Opponent{};
+            return;
+        }
+
+        std::istringstream in(value);
+        std::string title;
+        std::string elo;
+        std::string kind;
+        if (!(in >> title >> elo >> kind))
+            return;
+
+        if (title != "GM" && title != "IM" && title != "FM" && title != "WGM" && title != "WIM" && title != "none")
+            return;
+
+        int rating = 0;
+        if (elo != "none")
+        {
+            try
+            {
+                rating = std::stoi(elo);
+            }
+            catch (const std::exception &)
+            {
+                return;
+            }
+            if (rating < 0)
+                return;
+        }
+
+        if (kind != "computer" && kind != "human")
+            return;
+
+        std::string name;
+        std::getline(in, name);
+        if (!name.empty() && name.front() == ' ')
+            name.erase(0, 1);
+
+        opponent.title = title;
+        opponent.elo = rating;
+        opponent.computer = kind == "computer";
+        opponent.name = name;
+    }
+
     // Convert a UCI move string ("e2e4", "e7e8q") into a Move by matching the
     // pseudo-legal move list of the current position.
     Move parseMove(const Position &pos, const std::string &s)
@@ -259,6 +316,9 @@ void uci::loop()
             std::cout << "option name Move Overhead type spin default " << search::MOVE_OVERHEAD_DEFAULT
                       << " min " << search::MOVE_OVERHEAD_MIN << " max " << search::MOVE_OVERHEAD_MAX << std::endl;
             std::cout << "option name UCI_Chess960 type check default false" << std::endl;
+            std::cout << "option name UCI_AnalyseMode type check default false" << std::endl;
+            std::cout << "option name UCI_ShowRefutations type check default false" << std::endl;
+            std::cout << "option name UCI_Opponent type string default <empty>" << std::endl;
             std::cout << "option name Use NNUE type check default true" << std::endl;
             std::cout << "option name Search Stats type check default false" << std::endl;
             if (nnue::loaded())
@@ -327,6 +387,12 @@ void uci::loop()
                     search::setMultiPV(std::stoi(value));
                 else if (name == "Contempt")
                     search::setContempt(std::stoi(value));
+                else if (name == "UCI_AnalyseMode")
+                    search::setAnalyseMode(value == "true");
+                else if (name == "UCI_ShowRefutations")
+                    search::setShowRefutations(value == "true");
+                else if (name == "UCI_Opponent")
+                    setOpponent(value);
                 else if (name == "Move Overhead")
                     search::setMoveOverhead(std::stoi(value));
                 else if (name == "Clear Hash")

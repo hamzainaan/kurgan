@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <ctime>
 #include <cstring>
 #include <iostream>
 #include <mutex>
@@ -112,11 +113,14 @@ namespace
     int threadCountSetting = 1;
     int multiPVSetting = 1;
     int contemptSetting = 0;
+    bool analyseMode = false;
+    bool showRefutations = false;
     bool ponderSetting = false;
     int64_t nodesLimit = 0;
     int mateGoal = 0;
     Color activeUs = WHITE;
     search::SearchLimits activeLimits;
+    std::clock_t searchCpuStart = 0;
 
     std::mutex outputMutex;
     std::mutex bestMutex;
@@ -132,6 +136,7 @@ namespace
     thread_local int workerId = 0;
     thread_local int currentMultiPV = 1;
     thread_local bool inNullVerification = false;
+    thread_local bool refutationSent = false;
     thread_local std::vector<Move> excludedRootMoves;
     thread_local Move killers[2][MAX_PLY];
     thread_local int history[COLOR_NB][SQUARE_NB][SQUARE_NB];
@@ -277,7 +282,8 @@ namespace
 
     int drawScore(const Position &pos)
     {
-        return pos.sideToMove == activeUs ? -contemptSetting : contemptSetting;
+        const int contempt = analyseMode ? 0 : contemptSetting;
+        return pos.sideToMove == activeUs ? -contempt : contempt;
     }
 
     void checkTime()
@@ -656,6 +662,28 @@ namespace
         return false;
     }
 
+    int cpuLoadPermill(long long elapsedMs)
+    {
+        const std::clock_t now = std::clock();
+        if (elapsedMs <= 0 || searchCpuStart == 0 || now < searchCpuStart)
+            return 0;
+
+        const double cpuMs = 1000.0 * static_cast<double>(now - searchCpuStart) / CLOCKS_PER_SEC;
+        return std::clamp(static_cast<int>(cpuMs * 1000.0 / static_cast<double>(elapsedMs)), 0, 1000);
+    }
+
+    void printRefutation(const Move *pv, int length)
+    {
+        if (silentOutput || !showRefutations || length <= 0)
+            return;
+
+        std::lock_guard<std::mutex> lock(outputMutex);
+        std::cout << "info refutation " << moveToUci(pv[0]);
+        for (int i = 1; i < length; ++i)
+            std::cout << ' ' << moveToUci(pv[i]);
+        std::cout << std::endl;
+    }
+
     void printInfo(int depth, int score, uint64_t nodeCount, long long elapsedMs, const Move *pv, int pvLen, int mpv = 1)
     {
         if (silentOutput)
@@ -680,6 +708,7 @@ namespace
         if (elapsedMs > 0)
             std::cout << " nps " << (nodeCount * 1000 / elapsedMs);
         std::cout << " hashfull " << tt::hashfull();
+        std::cout << " cpuload " << cpuLoadPermill(elapsedMs);
         std::cout << " time " << elapsedMs;
 
         std::cout << " pv";
@@ -1149,6 +1178,17 @@ namespace
             if (stopFlag.load(std::memory_order_relaxed))
                 return 0;
 
+            if (ply == 0 && workerId == 0 && showRefutations && !refutationSent && bestScore > -INF && score < bestScore)
+            {
+                Move line[MAX_PLY];
+                int length = 1;
+                line[0] = m;
+                for (int i = ply + 1; i < pvLength[ply + 1] && length < MAX_PLY; ++i)
+                    line[length++] = pvTable[ply + 1][i];
+                printRefutation(line, length);
+                refutationSent = true;
+            }
+
             if (score > bestScore)
             {
                 bestScore = score;
@@ -1596,6 +1636,7 @@ namespace
             const int mpvCount = isMain ? multiPVSetting : 1;
             const int64_t iterationStart = manager::elapsedMs();
             excludedRootMoves.clear();
+            refutationSent = false;
 
             RootLine lines[search::MULTIPV_MAX];
             int lineCount = 0;
@@ -1841,6 +1882,7 @@ void search::go(const Position &root, const SearchLimits &limits)
     finalPonderMove = Move();
 
     tt::newSearch();
+    searchCpuStart = std::clock();
 
     // A reporting search starts from an empty record set.
     if (stats::reporting())
@@ -1988,6 +2030,20 @@ void search::setContempt(int value)
         contemptSetting = clamped;
         clear();
     }
+}
+
+void search::setAnalyseMode(bool enabled)
+{
+    if (enabled == analyseMode)
+        return;
+
+    analyseMode = enabled;
+    clear();
+}
+
+void search::setShowRefutations(bool enabled)
+{
+    showRefutations = enabled;
 }
 
 void search::setPonder(bool enabled)
