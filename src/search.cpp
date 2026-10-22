@@ -27,6 +27,7 @@ namespace
     constexpr int INF = 32000;
     constexpr int MAX_PLY = 128;
     constexpr int MAX_DEPTH = 64;
+    constexpr int FULL_WIDTH_DEPTH = 3;
 
     // Runtime-tunable pruning parameters, exposed as UCI spin options.
     struct TuningParam
@@ -861,12 +862,13 @@ namespace
                                                                             : NO_EVAL;
         const bool improving = !inCheck && pastEval != NO_EVAL && staticEval > pastEval;
         const bool mateWindow = beta >= MATE_THRESHOLD || beta <= -MATE_THRESHOLD;
+        const bool shallowSearch = rootDepth <= FULL_WIDTH_DEPTH;
 
         const Bitboard nonPawnPieces = pos.byType[KNIGHT] | pos.byType[BISHOP] |
                                        pos.byType[ROOK] | pos.byType[QUEEN];
         const bool hasNonPawn = (nonPawnPieces & pos.byColor[us]) != 0;
 
-        if (!pvNode && !inCheck && !mateWindow)
+        if (!pvNode && !inCheck && !mateWindow && !shallowSearch)
         {
             if (depth <= tuned::RAZOR_DEPTH && eval + tuned::RAZOR_MARGIN * depth < alpha)
             {
@@ -995,7 +997,7 @@ namespace
             const int histScore = picker.lastHistory;
             ++moveCount;
 
-            if (ply > 0 && hasNonPawn && bestScore > -MATE_THRESHOLD)
+            if (ply > 0 && !shallowSearch && hasNonPawn && bestScore > -MATE_THRESHOLD)
             {
                 const int lmrDepth = std::max(0, depth - 1 - lmrTable[std::min(depth, MAX_DEPTH - 1)][std::min(moveCount, 63)]);
 
