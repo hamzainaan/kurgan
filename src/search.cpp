@@ -519,6 +519,15 @@ namespace
         int history;
     };
 
+    struct RootLine
+    {
+        Move move{};
+        int score = 0;
+        int seldepth = 0;
+        int pvLength = 0;
+        Move pv[MAX_PLY]{};
+    };
+
     constexpr int TT_MOVE_SCORE = 10000000;
     constexpr int CAPTURE_BAND = 6000000;
     constexpr int KILLER1_SCORE = 5000000;
@@ -1588,6 +1597,9 @@ namespace
             const int64_t iterationStart = manager::elapsedMs();
             excludedRootMoves.clear();
 
+            RootLine lines[search::MULTIPV_MAX];
+            int lineCount = 0;
+
             for (int mpv = 1; mpv <= mpvCount; ++mpv)
             {
                 currentMultiPV = mpv;
@@ -1608,14 +1620,53 @@ namespace
                     break;
                 }
 
-                if (mpv == 1)
+                if (pvLength[0] <= 0)
                 {
-                    scoreDrop = previousScore - score; // > 0 means the score fell
-                    previousScore = score;
-                    lastCompletedScore = score;
+                    if (mpv == 1)
+                    {
+                        RootLine &line = lines[lineCount++];
+                        line.score = score;
+                        line.seldepth = seldepth;
+                    }
+                    break;
                 }
 
-                // Only the main thread reports.
+                RootLine &line = lines[lineCount++];
+                line.move = pvTable[0][0];
+                line.score = score;
+                line.seldepth = seldepth;
+                line.pvLength = extendPVFromTT(pos, pvTable[0], pvLength[0]);
+                for (int i = 0; i < line.pvLength; ++i)
+                    line.pv[i] = pvTable[0][i];
+
+                // Stop once a mate within the requested distance has been found.
+                if (mateGoal > 0 && score >= MATE_THRESHOLD && (MATE - score + 1) / 2 <= mateGoal)
+                {
+                    stopFlag.store(true, std::memory_order_relaxed);
+                    break;
+                }
+
+                excludedRootMoves.push_back(line.move);
+            }
+
+            if (lineCount > 0)
+            {
+                for (int i = 1; i < lineCount; ++i)
+                {
+                    const RootLine key = lines[i];
+                    int j = i - 1;
+                    while (j >= 0 && lines[j].score < key.score)
+                    {
+                        lines[j + 1] = lines[j];
+                        --j;
+                    }
+                    lines[j + 1] = key;
+                }
+
+                scoreDrop = previousScore - lines[0].score;
+                previousScore = lines[0].score;
+                lastCompletedScore = lines[0].score;
+
                 if (isMain)
                 {
                     const long long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1628,30 +1679,22 @@ namespace
                     // checkTime), so a shallow search reported "nodes 0".
                     const uint64_t reported = searchedNodes.load(std::memory_order_relaxed)
                                               + static_cast<uint64_t>(nodes & 2047);
-                    const int pvLen = extendPVFromTT(pos, pvTable[0], pvLength[0]);
-                    printInfo(depth, score, reported, elapsed, pvTable[0], pvLen, mpv);
-
-                    if (mpv == 1)
+                    for (int i = 0; i < lineCount; ++i)
                     {
-                        std::lock_guard<std::mutex> lock(bestMutex);
-                        if (depth > completedDepth)
-                        {
-                            completedDepth = depth;
-                            finalScore = score;
-                            finalBestMove = pvTable[0][0];
-                            finalPonderMove = pvLength[0] > 1 ? pvTable[0][1] : Move();
-                        }
+                        seldepth = lines[i].seldepth;
+                        printInfo(depth, lines[i].score, reported, elapsed, lines[i].pv, lines[i].pvLength, i + 1);
+                    }
+                    seldepth = lines[0].seldepth;
+
+                    std::lock_guard<std::mutex> lock(bestMutex);
+                    if (depth > completedDepth)
+                    {
+                        completedDepth = depth;
+                        finalScore = lines[0].score;
+                        finalBestMove = lines[0].move;
+                        finalPonderMove = lines[0].pvLength > 1 ? lines[0].pv[1] : Move();
                     }
                 }
-
-                // Stop once a mate within the requested distance has been found.
-                if (mateGoal > 0 && score >= MATE_THRESHOLD && (MATE - score + 1) / 2 <= mateGoal)
-                {
-                    stopFlag.store(true, std::memory_order_relaxed);
-                    break;
-                }
-
-                excludedRootMoves.push_back(pvTable[0][0]);
             }
 
             if (stopFlag.load(std::memory_order_relaxed))
@@ -1664,11 +1707,12 @@ namespace
             if (isMain && depth >= 4 &&
                 !(ponderFlag.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed)))
             {
-                if (pvTable[0][0] == stableMove)
+                const Move iterationBest = lineCount > 0 ? lines[0].move : Move();
+                if (iterationBest == stableMove)
                     ++stableIterations;
                 else
                 {
-                    stableMove = pvTable[0][0];
+                    stableMove = iterationBest;
                     stableIterations = 0;
                 }
 
