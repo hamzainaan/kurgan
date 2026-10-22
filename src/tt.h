@@ -32,7 +32,7 @@ namespace tt
         // 6-bit write generation | 2-bit bound.
         uint8_t genBound = 0;
 
-        bool empty() const { return key == 0; }
+        bool empty() const { return bound() == BOUND_NONE; }
         int depth() const { return depthPv & 127; }
         bool pv() const { return (depthPv & 128) != 0; }
         int bound() const { return genBound & 3; }

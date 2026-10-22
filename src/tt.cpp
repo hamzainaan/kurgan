@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <new>
 
 #if defined(_WIN32)
@@ -46,6 +47,9 @@ namespace
 #if defined(_WIN32)
         return VirtualAlloc(nullptr, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 #else
+        if (bytes > std::numeric_limits<size_t>::max() - HUGE_PAGE)
+            return nullptr;
+
         const size_t span = bytes + HUGE_PAGE;
         void *raw = mmap(nullptr, span, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (raw == MAP_FAILED)
@@ -115,10 +119,16 @@ int tt::scoreToTT(int score, int ply)
 
 void tt::resize(size_t megabytes)
 {
-    const size_t clusters = megabytes * 1024 * 1024 / sizeof(Cluster);
+    if (megabytes == 0)
+        megabytes = 1;
+
+    const uint64_t clusters = static_cast<uint64_t>(megabytes) * 1024 * 1024 / sizeof(Cluster);
+    if (clusters > static_cast<uint64_t>(std::numeric_limits<size_t>::max() / sizeof(Cluster)))
+        throw std::bad_alloc();
+
     size_t n = 1;
-    while ((n << 1) <= clusters)
-        n <<= 1;
+    while (static_cast<uint64_t>(n) * 2 <= clusters)
+        n *= 2;
 
     const size_t bytes = n * sizeof(Cluster);
     void *memory = allocateZeroed(bytes);
@@ -161,14 +171,14 @@ tt::Entry *tt::probe(uint64_t key)
     bool occupied = false;
     for (Entry &e : table[key & clusterMask].entry)
     {
-        if (e.key == stored)
+        if (!e.empty() && e.key == stored)
         {
             ++tally.ttHits;
             if (e.bound() == BOUND_EXACT)
                 ++tally.ttExact;
             return &e;
         }
-        occupied |= e.key != 0;
+        occupied |= !e.empty();
     }
 
     if (occupied)
@@ -189,7 +199,7 @@ void tt::store(uint64_t key, Move move, int score, int depth, int bound, int ply
     Entry *freeSlot = nullptr;
     for (Entry &e : cluster.entry)
     {
-        if (e.key == stored)
+        if (!e.empty() && e.key == stored)
         {
             if (!protectedMate(e, stored, bound) && (bound == BOUND_EXACT || depth + 4 > e.depth() || e.age(generation) != 0))
                 save(e, stored, move == Move() ? e.move : move, score, depth, bound, ply, eval, pv);
