@@ -26,8 +26,8 @@
 namespace
 {
     constexpr int INF = 32000;
-    constexpr int MAX_PLY = 128;
-    constexpr int MAX_DEPTH = 64;
+    constexpr int MAX_PLY = 256;
+    constexpr int MAX_DEPTH = 128;
     constexpr int FULL_WIDTH_DEPTH = 3;
 
     // Runtime-tunable pruning parameters, exposed as UCI spin options.
@@ -1888,7 +1888,7 @@ void search::go(const Position &root, const SearchLimits &limits)
     if (stats::reporting())
         stats::clearRecords();
 
-    maxDepth = limits.depth > 0 ? limits.depth : MAX_DEPTH;
+    maxDepth = limits.depth > 0 ? std::min(limits.depth, MAX_DEPTH) : MAX_DEPTH;
 
     const unsigned nThreads = static_cast<unsigned>(threadCount());
 
