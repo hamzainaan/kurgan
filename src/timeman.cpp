@@ -56,7 +56,6 @@ namespace manager
     constexpr double CLOCK_LEAD_W = 0.18;
     constexpr double CLOCK_LEAD_MIN = 0.85;
     constexpr double CLOCK_LEAD_MAX = 1.25;
-    constexpr double BANK_W = 0.40;
     constexpr double BANK_REF_MS = 60000.0;
     constexpr double BANK_INCREMENT_MS = 1000.0;
     constexpr double BANK_MAX = 1.40;

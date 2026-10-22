@@ -30,7 +30,7 @@ struct Move
     {
     }
     constexpr Move(Square from, Square to, uint16_t flag = NORMAL)
-        : data(static_cast<uint16_t>(from) | (static_cast<uint16_t>(to) << 6) | flag)
+        : data(static_cast<uint16_t>(static_cast<uint16_t>(from) | (static_cast<uint16_t>(to) << 6) | flag))
     {
     }
 
@@ -102,11 +102,18 @@ namespace movegen
     // Attack bitboard for a non-pawn piece type from a square, given occupancy.
     Bitboard attacks(PieceType pt, Square sq, Bitboard occupied);
 
-    // Squares from which a pawn of color 'c' attacks 'sq'. 
+    // Squares attacked by a pawn of color 'c' standing on 'sq'.
     Bitboard pawnAttacksFrom(Color c, Square sq);
 
     // True if 'sq' is attacked by color 'by'.
     bool squareAttacked(const Position &pos, Square sq, Color by);
+
+    // True if the move captures, promotes or is an en passant capture.
+    inline bool isTactical(const Position &pos, Move m)
+    {
+        return m.isPromotion() || m.isEnPassant()
+               || (!m.isCastling() && pos.board[m.to()] != NO_PIECE);
+    }
 
     // Generate all pseudo-legal moves for the side to move.
     void generate_pseudo_legal_moves(const Position &pos, MoveList &list);

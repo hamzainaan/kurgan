@@ -19,10 +19,6 @@
 #include <thread>
 #include <vector>
 
-#if defined(_MSC_VER)
-#include <intrin.h>
-#endif
-
 namespace
 {
     constexpr int INF = 32000;
@@ -195,53 +191,6 @@ namespace
                 lmrTable[d][m] = static_cast<int>(tuned::LMR_BASE / 100.0 + std::log(d) * std::log(m) * 100.0 / tuned::LMR_DIVISOR);
     }
 
-    int countrZero(Bitboard b)
-    {
-#if defined(__GNUC__) || defined(__clang__)
-        return __builtin_ctzll(b);
-#elif defined(_MSC_VER)
-        unsigned long index = 0;
-        _BitScanForward64(&index, b);
-        return static_cast<int>(index);
-#else
-        int n = 0;
-        while ((b & 1) == 0)
-        {
-            b >>= 1;
-            ++n;
-        }
-        return n;
-#endif
-    }
-
-    Square lsb(Bitboard b)
-    {
-        return static_cast<Square>(countrZero(b));
-    }
-
-    int popCount(Bitboard b)
-    {
-#if defined(__GNUC__) || defined(__clang__)
-        return __builtin_popcountll(b);
-#elif defined(_MSC_VER)
-        return static_cast<int>(__popcnt64(b));
-#else
-        int n = 0;
-        while (b)
-        {
-            b &= b - 1;
-            ++n;
-        }
-        return n;
-#endif
-    }
-
-    Square kingSquare(const Position &pos, Color c)
-    {
-        const Bitboard k = pos.byColor[c] & pos.byType[KING];
-        return k ? lsb(k) : SQ_NONE;
-    }
-
     // Hardware concurrency of the machine the engine is running on.
     int hardwareThreads()
     {
@@ -318,12 +267,6 @@ namespace
         stopFlag.store(true, std::memory_order_relaxed);
     }
 
-    bool isTactical(const Position &pos, Move m)
-    {
-        // Castling is a quiet move whose "to" square holds our own rook.
-        return m.isPromotion() || m.isEnPassant() || (!m.isCastling() && pos.board[m.to()] != NO_PIECE);
-    }
-
     // The captured piece, treating en passant as capturing a pawn.
     Piece victimOf(const Position &pos, Move m)
     {
@@ -334,7 +277,7 @@ namespace
     bool givesCheck(const Position &pos, Move m)
     {
         const Color us = pos.sideToMove;
-        const Square ksq = kingSquare(pos, static_cast<Color>(us ^ 1));
+        const Square ksq = pos.kingSquare(static_cast<Color>(us ^ 1));
         if (ksq == SQ_NONE)
             return false;
 
@@ -567,7 +510,7 @@ namespace
             for (int i = 0; i < list.size; ++i)
             {
                 const Move m = list.moves[i];
-                const bool tactical = isTactical(pos, m);
+                const bool tactical = movegen::isTactical(pos, m);
                 if (capturesOnly && !tactical)
                     continue;
 
@@ -723,7 +666,7 @@ namespace
     bool isCheckmated(Position &pos)
     {
         const Color us = pos.sideToMove;
-        const Square ksq = kingSquare(pos, us);
+        const Square ksq = pos.kingSquare(us);
         if (ksq == SQ_NONE || !movegen::squareAttacked(pos, ksq, static_cast<Color>(us ^ 1)))
             return false;
 
@@ -734,6 +677,20 @@ namespace
                 return false;
 
         return true;
+    }
+
+    // First legal move in pseudo-legal generation order, or Move() if there is none.
+    Move firstLegalMove(const Position &pos)
+    {
+        MoveList list;
+        movegen::generate_pseudo_legal_moves(pos, list);
+        for (int i = 0; i < list.size; ++i)
+        {
+            Position next = pos;
+            if (next.do_move(list.moves[i]))
+                return list.moves[i];
+        }
+        return Move();
     }
 
     bool hasMateProof(Position &pos, int ply, int score)
@@ -873,7 +830,7 @@ namespace
 
         setContinuationRows(pos, ply);
 
-        const Square ksq = kingSquare(pos, us);
+        const Square ksq = pos.kingSquare(us);
         const bool inCheck = ksq != SQ_NONE &&
                              movegen::squareAttacked(pos, ksq, static_cast<Color>(us ^ 1));
 
@@ -1016,7 +973,7 @@ namespace
         Move bestMove{};
         int bestScore = -INF;
         int legalMoves = 0;
-        const bool ttCapture = ttMove != Move() && isTactical(pos, ttMove);
+        const bool ttCapture = ttMove != Move() && movegen::isTactical(pos, ttMove);
 
         Move searchedQuiets[MoveList::MAX_MOVES];
         int searchedQuietCount = 0;
@@ -1030,7 +987,7 @@ namespace
             if (m == excluded || (ply == 0 && (!inSearchMoves(m) || isExcludedRootMove(m))))
                 continue;
 
-            const bool quiet = !isTactical(pos, m);
+            const bool quiet = !movegen::isTactical(pos, m);
             const bool checks = givesCheck(pos, m);
             const int histScore = picker.lastHistory;
             ++moveCount;
@@ -1282,7 +1239,7 @@ namespace
 
             tt::store(key, bound == BOUND_UPPER ? Move() : bestMove, bestScore, depth, bound, ply, rawEval, ttPv);
 
-            if (!inCheck && (bound == BOUND_UPPER || !isTactical(pos, bestMove))
+            if (!inCheck && (bound == BOUND_UPPER || !movegen::isTactical(pos, bestMove))
                 && !(bound == BOUND_LOWER && bestScore <= staticEval)
                 && !(bound == BOUND_UPPER && bestScore >= staticEval)
                 && bestScore > -MATE_THRESHOLD && bestScore < MATE_THRESHOLD)
@@ -1313,7 +1270,7 @@ namespace
 
         const Color us = pos.sideToMove;
         const Color them = static_cast<Color>(us ^ 1);
-        const Square ksq = kingSquare(pos, us);
+        const Square ksq = pos.kingSquare(us);
         const bool inCheck = ksq != SQ_NONE && movegen::squareAttacked(pos, ksq, them);
         const uint64_t key = pos.zobristKey;
         const int originalAlpha = alpha;
@@ -1395,7 +1352,7 @@ namespace
                     }
                 }
             }
-            else if (bestScore > -MATE_THRESHOLD && !isTactical(pos, m))
+            else if (bestScore > -MATE_THRESHOLD && !movegen::isTactical(pos, m))
                 continue;
 
             if (!pos.do_move(m))
@@ -1579,17 +1536,7 @@ namespace
         stats::current() = stats::Tally{};
 
         // A root without a single legal move (checkmate/stalemate) has nothing to search
-        bool rootHasLegalMove = false;
-        {
-            MoveList rootList;
-            movegen::generate_pseudo_legal_moves(pos, rootList);
-            for (int i = 0; i < rootList.size && !rootHasLegalMove; ++i)
-            {
-                Position probe = pos;
-                if (probe.do_move(rootList.moves[i]))
-                    rootHasLegalMove = true;
-            }
-        }
+        const bool rootHasLegalMove = firstLegalMove(pos) != Move();
 
         const bool isMain = (workerId == 0);
 
@@ -1909,19 +1856,7 @@ void search::go(const Position &root, const SearchLimits &limits)
 
     // Never report 0000 while the root position has a legal move.
     if (finalBestMove == Move())
-    {
-        MoveList list;
-        movegen::generate_pseudo_legal_moves(root, list);
-        for (int i = 0; i < list.size; ++i)
-        {
-            Position next = root;
-            if (next.do_move(list.moves[i]))
-            {
-                finalBestMove = list.moves[i];
-                break;
-            }
-        }
-    }
+        finalBestMove = firstLegalMove(root);
 
     if (stats::reporting())
         stats::print();

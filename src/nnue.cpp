@@ -5,10 +5,6 @@
 
 #include <cstring>
 
-#if defined(_MSC_VER)
-#include <intrin.h>
-#endif
-
 #if defined(__AVX2__) || defined(__SSE4_1__)
 #include <immintrin.h>
 #endif
@@ -26,9 +22,6 @@ namespace
     std::string g_file;
     std::string g_error;
     bool g_enabled = true;
-
-    // Bumped whenever the loaded network changes: cached accumulators are stale.
-    uint32_t g_generation = 1;
 }
 
 #ifndef KURGAN_NNUE
@@ -61,37 +54,9 @@ namespace
     };
 
     Network *g_net = nullptr;
-    uint32_t g_hash = 0;
 
-    int bitCount(Bitboard b)
-    {
-#if defined(__GNUC__) || defined(__clang__)
-        return __builtin_popcountll(b);
-#elif defined(_MSC_VER)
-        return static_cast<int>(__popcnt64(b));
-#else
-        int n = 0;
-        for (; b; b &= b - 1)
-            ++n;
-        return n;
-#endif
-    }
-
-    int bitScan(Bitboard b)
-    {
-#if defined(__GNUC__) || defined(__clang__)
-        return __builtin_ctzll(b);
-#elif defined(_MSC_VER)
-        unsigned long index = 0;
-        _BitScanForward64(&index, b);
-        return static_cast<int>(index);
-#else
-        int n = 0;
-        for (; (b & 1) == 0; b >>= 1)
-            ++n;
-        return n;
-#endif
-    }
+    // Bumped whenever the loaded network changes: cached accumulators are stale.
+    uint32_t g_generation = 1;
 
     uint32_t fnv1a(const void *data, size_t size)
     {
@@ -390,9 +355,9 @@ namespace
 
                 const int offset = colourBase + pt * nnue::PIECE_STRIDE;
                 for (Bitboard b = changed & now; b; b &= b - 1)
-                    adds[addCount++] = offset + (bitScan(b) ^ flip);
+                    adds[addCount++] = offset + (static_cast<int>(lsb(b)) ^ flip);
                 for (Bitboard b = changed & ~now; b; b &= b - 1)
-                    subs[subCount++] = offset + (bitScan(b) ^ flip);
+                    subs[subCount++] = offset + (static_cast<int>(lsb(b)) ^ flip);
             }
         }
 
@@ -406,7 +371,7 @@ namespace
 
     int outputBucket(const Position &pos)
     {
-        const int pieces = bitCount(pos.byColor[WHITE] | pos.byColor[BLACK]);
+        const int pieces = popCount(pos.byColor[WHITE] | pos.byColor[BLACK]);
         const int bucket = (pieces - 2) / (32 / nnue::OUTPUT_BUCKETS);
         return bucket < 0 ? 0 : (bucket < nnue::OUTPUT_BUCKETS ? bucket : nnue::OUTPUT_BUCKETS - 1);
     }
@@ -457,7 +422,6 @@ bool nnue::loadFromMemory(const uint8_t *data, size_t size, const std::string &n
     net->hash = fnv1a(data, size);
     g_net = net;
     g_file = name;
-    g_hash = net->hash;
     g_error.clear();
     return true;
 }
@@ -476,7 +440,6 @@ void nnue::unload()
     delete g_net;
     g_net = nullptr;
     g_file.clear();
-    g_hash = 0;
     ++g_generation;
 }
 
@@ -497,7 +460,7 @@ bool nnue::active() { return g_net != nullptr && g_enabled; }
 
 const std::string &nnue::file() { return g_file; }
 
-uint32_t nnue::hash() { return g_hash; }
+uint32_t nnue::hash() { return g_net != nullptr ? g_net->hash : 0; }
 
 int nnue::evaluate(const Position &pos)
 {

@@ -28,8 +28,6 @@
 
 namespace
 {
-    constexpr const char *START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-
     constexpr int OPENING_MAX_SCORE = 500;
     constexpr int WIN_SCORE = 2500;
     constexpr int WIN_PLIES = 4;
@@ -96,11 +94,6 @@ namespace
     {
         const Square ksq = pos.kingSquare(pos.sideToMove);
         return ksq != SQ_NONE && movegen::squareAttacked(pos, ksq, static_cast<Color>(pos.sideToMove ^ 1));
-    }
-
-    bool isNoisy(const Position &pos, Move m)
-    {
-        return m.isPromotion() || m.isEnPassant() || (!m.isCastling() && pos.board[m.to()] != NO_PIECE);
     }
 
     bool bareMinors(const Position &pos)
@@ -174,7 +167,7 @@ namespace
                 break;
             }
 
-            if (!checked && !isNoisy(pos, m))
+            if (!checked && !movegen::isTactical(pos, m))
             {
                 records.push_back(encode(pos, score));
                 sides.push_back(us);

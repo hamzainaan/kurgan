@@ -5,14 +5,8 @@
 #include <iostream>
 #include <sstream>
 
-#if defined(_MSC_VER)
-#include <intrin.h>
-#endif
-
 namespace
 {
-    constexpr const char *START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-
     Piece charToPiece(char c)
     {
         switch (c)
@@ -63,11 +57,7 @@ namespace
 
     uint64_t rand64()
     {
-        rngState += 0x9E3779B97F4A7C15ULL;
-        uint64_t z = rngState;
-        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
-        z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
-        return z ^ (z >> 31);
+        return splitMix64(rngState);
     }
 
     std::array<std::array<uint64_t, SQUARE_NB>, PIECE_NB> pieceKeys{};
@@ -94,54 +84,6 @@ namespace
     uint64_t epKey(Square s)
     {
         return s == SQ_NONE ? 0 : enPassantKeys[s & 7];
-    }
-
-    int countrZero(Bitboard b)
-    {
-#if defined(__GNUC__) || defined(__clang__)
-        return __builtin_ctzll(b);
-#elif defined(_MSC_VER)
-        unsigned long index = 0;
-        _BitScanForward64(&index, b);
-        return static_cast<int>(index);
-#else
-        int n = 0;
-        while ((b & 1) == 0)
-        {
-            b >>= 1;
-            ++n;
-        }
-        return n;
-#endif
-    }
-
-    Square lsb(Bitboard b)
-    {
-        return static_cast<Square>(countrZero(b));
-    }
-
-    int countLeadingZeros(Bitboard b)
-    {
-#if defined(__GNUC__) || defined(__clang__)
-        return __builtin_clzll(b);
-#elif defined(_MSC_VER)
-        unsigned long index = 0;
-        _BitScanReverse64(&index, b);
-        return 63 - static_cast<int>(index);
-#else
-        int n = 0;
-        while ((b & 0x8000000000000000ULL) == 0)
-        {
-            b <<= 1;
-            ++n;
-        }
-        return n;
-#endif
-    }
-
-    Square msb(Bitboard b)
-    {
-        return static_cast<Square>(63 - countLeadingZeros(b));
     }
 
     Bitboard backRankOf(Color c)

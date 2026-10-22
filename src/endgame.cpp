@@ -59,20 +59,11 @@ namespace
 
     Bitboard bb(Square s) { return 1ULL << s; }
     Bitboard fileBB(int file) { return FILE_A_BB << file; }
-    Square lsbSq(Bitboard b) { return static_cast<Square>(std::countr_zero(b)); }
-    Square msbSq(Bitboard b) { return static_cast<Square>(63 - std::countl_zero(b)); }
     bool moreThanOne(Bitboard b) { return (b & (b - 1)) != 0; }
-
-    Square popLsb(Bitboard &b)
-    {
-        const Square s = lsbSq(b);
-        b &= b - 1;
-        return s;
-    }
 
     Square pieceSquare(const Position &pos, Color c, PieceType pt)
     {
-        return lsbSq(pos.byColor[c] & pos.byType[pt]);
+        return lsb(pos.byColor[c] & pos.byType[pt]);
     }
 
     Bitboard piecesOf(const Position &pos, Color c, PieceType pt)
@@ -125,14 +116,6 @@ namespace
         const int f = fileOf(s);
         const Bitboard files = fileBB(f) | (f > FILE_A ? fileBB(f - 1) : 0) | (f < FILE_H ? fileBB(f + 1) : 0);
         return forwardRanks(c, s) & files;
-    }
-
-    Bitboard pawnAttacks(Color c, Square s)
-    {
-        const Bitboard b = bb(s);
-        if (c == WHITE)
-            return ((b & ~FILE_A_BB) << 7) | ((b & ~FILE_H_BB) << 9);
-        return ((b & ~FILE_A_BB) >> 9) | ((b & ~FILE_H_BB) >> 7);
     }
 
     Bitboard kingAttacks(Square s) { return movegen::attacks(KING, s, 0); }
@@ -193,13 +176,13 @@ namespace
         const Square push = shift(e.pawn, 8);
 
         if (distance(wk, bk) <= 1 || wk == e.pawn || bk == e.pawn
-            || (e.stm == WHITE && (pawnAttacks(WHITE, e.pawn) & bb(bk))))
+            || (e.stm == WHITE && (movegen::pawnAttacksFrom(WHITE, e.pawn) & bb(bk))))
             e.result = KPK_INVALID;
         else if (e.stm == WHITE && rankOf(e.pawn) == RANK_7 && wk != push
                  && (distance(bk, push) > 1 || (kingAttacks(wk) & bb(push))))
             e.result = KPK_WIN;
         else if (e.stm == BLACK
-                 && (!(kingAttacks(bk) & ~(kingAttacks(wk) | pawnAttacks(WHITE, e.pawn)))
+                 && (!(kingAttacks(bk) & ~(kingAttacks(wk) | movegen::pawnAttacksFrom(WHITE, e.pawn)))
                      || (kingAttacks(bk) & bb(e.pawn) & ~kingAttacks(wk))))
             e.result = KPK_DRAW;
         else
@@ -459,7 +442,7 @@ namespace
 
         if (!(strongPawns & ~FILE_A_BB) || !(strongPawns & ~FILE_H_BB))
         {
-            const Square queening = relativeSquare(strong, makeSquare(fileOf(lsbSq(strongPawns)), RANK_8));
+            const Square queening = relativeSquare(strong, makeSquare(fileOf(lsb(strongPawns)), RANK_8));
             if (oppositeColors(queening, strongBishop) && distance(queening, weakKing) <= 1)
                 return 0;
         }
@@ -468,7 +451,7 @@ namespace
         if ((!(allPawns & ~fileBB(FILE_B)) || !(allPawns & ~fileBB(FILE_G)))
             && pos.byColor[weak] == (piecesOf(pos, weak, KING) | weakPawns) && weakPawns)
         {
-            const Square weakPawn = strong == WHITE ? msbSq(weakPawns) : lsbSq(weakPawns);
+            const Square weakPawn = strong == WHITE ? msb(weakPawns) : lsb(weakPawns);
             if (relativeRank(strong, weakPawn) == RANK_7
                 && (strongPawns & bb(shift(weakPawn, pawnPush(weak))))
                 && (oppositeColors(strongBishop, weakPawn) || !moreThanOne(strongPawns)))
@@ -493,7 +476,7 @@ namespace
 
         if (relativeRank(weak, weakKing) <= RANK_2 && relativeRank(weak, strongKing) >= RANK_4
             && relativeRank(weak, weakRook) == RANK_3
-            && (piecesOf(pos, weak, PAWN) & kingAttacks(weakKing) & pawnAttacks(strong, weakRook)))
+            && (piecesOf(pos, weak, PAWN) & kingAttacks(weakKing) & movegen::pawnAttacksFrom(strong, weakRook)))
             return 0;
 
         return SCALE_NONE;
@@ -592,8 +575,8 @@ namespace
     {
         const Color weak = static_cast<Color>(strong ^ 1);
         const Bitboard strongPawns = piecesOf(pos, strong, PAWN);
-        const Square pawn1 = lsbSq(strongPawns);
-        const Square pawn2 = msbSq(strongPawns);
+        const Square pawn1 = lsb(strongPawns);
+        const Square pawn2 = msb(strongPawns);
         const Square weakKing = pos.kingSquare(weak);
 
         if (passedPawn(pos, strong, pawn1) || passedPawn(pos, strong, pawn2))
@@ -648,8 +631,8 @@ namespace
 
         const Square weakKing = pos.kingSquare(weak);
         const Bitboard strongPawns = piecesOf(pos, strong, PAWN);
-        const Square pawn1 = lsbSq(strongPawns);
-        const Square pawn2 = msbSq(strongPawns);
+        const Square pawn1 = lsb(strongPawns);
+        const Square pawn2 = msb(strongPawns);
 
         Square block1;
         Square block2;

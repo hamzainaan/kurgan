@@ -8,16 +8,9 @@
 #ifndef KURGAN_HCE_OFF
 
 #include "movegen.h"
-#include "position.h"
-#include "stats.h"
 #include "tuned_params.h"
 
 #include <algorithm>
-#include <array>
-
-#if defined(_MSC_VER)
-#include <intrin.h>
-#endif
 
 namespace
 {
@@ -57,49 +50,6 @@ namespace
     constexpr Bitboard KSIDE_DIAG_REGION[2] = {
         FILE_C_BB | ((FILE_D_BB | FILE_E_BB) & 0x0000FFFFFFFF0000ULL),
         FILE_C_BB | FILE_D_BB | FILE_E_BB};
-
-    int countrZero(Bitboard b)
-    {
-#if defined(__GNUC__) || defined(__clang__)
-        return __builtin_ctzll(b);
-#elif defined(_MSC_VER)
-        unsigned long index = 0;
-        _BitScanForward64(&index, b);
-        return static_cast<int>(index);
-#else
-        int n = 0;
-        while ((b & 1) == 0)
-        {
-            b >>= 1;
-            ++n;
-        }
-        return n;
-#endif
-    }
-
-    int popCount(Bitboard b)
-    {
-#if defined(__GNUC__) || defined(__clang__)
-        return __builtin_popcountll(b);
-#elif defined(_MSC_VER)
-        return static_cast<int>(__popcnt64(b));
-#else
-        int n = 0;
-        while (b)
-        {
-            b &= b - 1;
-            ++n;
-        }
-        return n;
-#endif
-    }
-
-    Square popLsb(Bitboard &b)
-    {
-        const Square s = static_cast<Square>(countrZero(b));
-        b &= b - 1;
-        return s;
-    }
 
     Bitboard fileMask(int file)
     {
@@ -639,27 +589,6 @@ namespace
         }
     }
 
-    Square lsbSquare(Bitboard b)
-    {
-        return static_cast<Square>(countrZero(b));
-    }
-
-    Square msbSquare(Bitboard b)
-    {
-#if defined(__GNUC__) || defined(__clang__)
-        return static_cast<Square>(63 - __builtin_clzll(b));
-#elif defined(_MSC_VER)
-        unsigned long index = 0;
-        _BitScanReverse64(&index, b);
-        return static_cast<Square>(index);
-#else
-        Square s = SQ_A1;
-        while (b >>= 1)
-            ++s;
-        return s;
-#endif
-    }
-
     void kingPawnScore(const Position &pos, Color c, int &ks)
     {
         const Color them = static_cast<Color>(c ^ 1);
@@ -677,7 +606,7 @@ namespace
 
             if (ownOnFile)
             {
-                const Square pawnSq = (c == WHITE) ? lsbSquare(ownOnFile) : msbSquare(ownOnFile);
+                const Square pawnSq = (c == WHITE) ? lsb(ownOnFile) : msb(ownOnFile);
                 ks += tuned::PAWN_SHIELD_VALUE[f][relativeRank(c, rankOf(pawnSq))];
             }
             else
@@ -690,7 +619,7 @@ namespace
                 continue;
             }
 
-            const Square pawnSq = (c == WHITE) ? lsbSquare(enemyOnFile) : msbSquare(enemyOnFile);
+            const Square pawnSq = (c == WHITE) ? lsb(enemyOnFile) : msb(enemyOnFile);
             const int r = relativeRank(c, rankOf(pawnSq));
             const Square stopSq = static_cast<Square>(pawnSq + (c == WHITE ? -8 : 8));
             const int state = (ownOnFile == 0) ? 0 : ((ownOnFile & (1ULL << stopSq)) ? 1 : 2);

@@ -3,36 +3,8 @@
 #include <algorithm>
 #include <cstdint>
 
-#if defined(_MSC_VER)
-#include <intrin.h>
-#endif
-
 namespace
 {
-    int countrZero(Bitboard b)
-    {
-#if defined(__GNUC__) || defined(__clang__)
-        return __builtin_ctzll(b);
-#elif defined(_MSC_VER)
-        unsigned long index = 0;
-        _BitScanForward64(&index, b);
-        return static_cast<int>(index);
-#else
-        int n = 0;
-        while ((b & 1) == 0)
-        {
-            b >>= 1;
-            ++n;
-        }
-        return n;
-#endif
-    }
-
-    Square lsb(Bitboard b)
-    {
-        return static_cast<Square>(countrZero(b));
-    }
-
     // All squares whose piece attacks 'to', both colors, given occupancy.
     Bitboard attackersTo(const Position &pos, Square to, Bitboard occ)
     {

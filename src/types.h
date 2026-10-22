@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bit>
 #include <cstdint>
 
 // 64-bit unsigned integer with one bit per square.
@@ -88,6 +89,7 @@ enum File : int
     FILE_H,
     FILE_NB = 8
 };
+
 enum Rank : int
 {
     RANK_1,
@@ -138,6 +140,38 @@ enum Piece : int
     B_KING,
     PIECE_NB = 16
 };
+
+// Bit-scan and population-count helpers shared by every module.
+constexpr int popCount(Bitboard b)
+{
+    return std::popcount(b);
+}
+
+constexpr Square lsb(Bitboard b)
+{
+    return static_cast<Square>(std::countr_zero(b));
+}
+
+constexpr Square msb(Bitboard b)
+{
+    return static_cast<Square>(63 - std::countl_zero(b));
+}
+
+inline Square popLsb(Bitboard &b)
+{
+    const Square s = lsb(b);
+    b &= b - 1;
+    return s;
+}
+
+// SplitMix64: advance 'state' and return the next value of the stream.
+inline uint64_t splitMix64(uint64_t &state)
+{
+    uint64_t z = (state += 0x9E3779B97F4A7C15ULL);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    return z ^ (z >> 31);
+}
 
 constexpr Piece makePiece(Color c, PieceType pt)
 {

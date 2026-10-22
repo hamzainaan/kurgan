@@ -2,67 +2,19 @@
 
 #include <cassert>
 
-#if defined(_MSC_VER)
-#include <intrin.h>
-#endif
-
 namespace
 {
     // Chess960 (Fischer Random) mode: only affects how castling moves are
     // rendered in (and parsed from) coordinate notation.
     bool chess960Mode = false;
 
-    // Portable bit utilities.
-    int popCount(Bitboard b)
-    {
-#if defined(__GNUC__) || defined(__clang__)
-        return __builtin_popcountll(b);
-#elif defined(_MSC_VER)
-        return static_cast<int>(__popcnt64(b));
-#else
-        int n = 0;
-        while (b)
-        {
-            b &= b - 1;
-            ++n;
-        }
-        return n;
-#endif
-    }
-
-    int countrZero(Bitboard b)
-    {
-#if defined(__GNUC__) || defined(__clang__)
-        return __builtin_ctzll(b);
-#elif defined(_MSC_VER)
-        unsigned long index = 0;
-        _BitScanForward64(&index, b);
-        return static_cast<int>(index);
-#else
-        int n = 0;
-        while ((b & 1) == 0)
-        {
-            b >>= 1;
-            ++n;
-        }
-        return n;
-#endif
-    }
-
     // Board geometry masks.
     constexpr Bitboard RANK_1_BB = 0x00000000000000FFULL;
     constexpr Bitboard RANK_2_BB = RANK_1_BB << 8;
-    constexpr Bitboard RANK_4_BB = RANK_1_BB << 24;
-    constexpr Bitboard RANK_5_BB = RANK_1_BB << 32;
     constexpr Bitboard RANK_7_BB = RANK_1_BB << 48;
     constexpr Bitboard RANK_8_BB = RANK_1_BB << 56;
 
     constexpr Bitboard FILE_A_BB = 0x0101010101010101ULL;
-    constexpr Bitboard FILE_B_BB = FILE_A_BB << 1;
-    constexpr Bitboard FILE_C_BB = FILE_A_BB << 2;
-    constexpr Bitboard FILE_D_BB = FILE_A_BB << 3;
-    constexpr Bitboard FILE_E_BB = FILE_A_BB << 4;
-    constexpr Bitboard FILE_F_BB = FILE_A_BB << 5;
     constexpr Bitboard FILE_H_BB = FILE_A_BB << 7;
 
     // Pre-computed leaper and pawn attack tables.
@@ -120,18 +72,6 @@ namespace
         0x844100C006820124ULL, 0x0591401294510447ULL, 0x4231102109440A00ULL, 0x423002083502A20CULL,
         0x680182A890100882ULL, 0x8E0B8081CC3E2025ULL, 0xD8000E0204420800ULL, 0x41104A0009420A0CULL,
         0x0021414A106A0208ULL, 0x0C44940821082180ULL, 0x4004E00875411C02ULL, 0xD088600C9A00C705ULL};
-
-    Square popLsb(Bitboard &b)
-    {
-        const Square s = static_cast<Square>(countrZero(b));
-        b &= b - 1;
-        return s;
-    }
-
-    Square lsb(Bitboard b)
-    {
-        return static_cast<Square>(countrZero(b));
-    }
 
     Bitboard slidingAttack(int sq, Bitboard occ, const int *df, const int *dr)
     {
@@ -320,12 +260,6 @@ namespace
         return between;
     }
 
-    Square kingSquareOf(const Position &pos, Color c)
-    {
-        const Bitboard k = pos.byColor[c] & pos.byType[KING];
-        return k ? lsb(k) : SQ_NONE;
-    }
-
     void putPiece(Position &pos, Piece p, Square sq)
     {
         const Bitboard bit = 1ULL << sq;
@@ -471,7 +405,7 @@ namespace
     void generateCastling(const Position &pos, MoveList &list)
     {
         const Color us = pos.sideToMove;
-        const Square ksq = kingSquareOf(pos, us);
+        const Square ksq = pos.kingSquare(us);
         if (ksq == SQ_NONE)
             return;
 

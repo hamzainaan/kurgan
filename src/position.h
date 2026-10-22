@@ -6,6 +6,10 @@
 #include <cstdint>
 #include <string>
 
+// Standard chess starting position.
+inline constexpr const char *START_FEN =
+    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
 // Castling rights as bit flags.
 enum CastlingRight : uint8_t
 {
