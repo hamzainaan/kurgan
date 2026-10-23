@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,12 @@ namespace search
     // Establishes handshake state before the search thread starts, so a
     // pipelined stop or ponderhit cannot race it.
     void prepare(const Position &root, const SearchLimits &limits);
+
+    // True from the moment prepare() accepted a go until the bestmove is sent.
+    bool isRunning();
+
+    // Serializes UCI output between the command thread and the search thread.
+    std::mutex &outputLock();
 
     // Continues a pondered search with the real clock.
     void ponderhit();

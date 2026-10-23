@@ -187,7 +187,7 @@ namespace manager
         rootDanger = std::min(1.0, threats / TENSION_MOVES);
     }
 
-    void computeDeadline(const search::SearchLimits &limits, Color us)
+    void computeDeadline(const search::SearchLimits &limits, Color us, bool ponderHit)
     {
         const auto start = Clock::now();
         startRep.store(start.time_since_epoch().count(), std::memory_order_relaxed);
@@ -198,6 +198,13 @@ namespace manager
         extendMax.store(EXTEND_MAX, std::memory_order_relaxed);
         failingLow.store(false, std::memory_order_relaxed);
         easyStopDepth.store(0, std::memory_order_relaxed);
+
+        // An infinite search only ends on an explicit stop.
+        if (limits.infinite || (limits.ponder && !ponderHit))
+        {
+            setDeadline(Clock::time_point::max());
+            return;
+        }
 
         if (limits.movetime > 0)
         {

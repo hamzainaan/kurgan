@@ -9,6 +9,7 @@
 #include "tuned_params.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <ctime>
@@ -74,6 +75,17 @@ namespace
         {"History Bonus Max", &tuned::HIST_BONUS_MAX, 256, 16384},
     };
 
+    // UCI option names are case insensitive.
+    bool sameOptionName(const std::string &a, const std::string &b)
+    {
+        if (a.size() != b.size())
+            return false;
+        for (size_t i = 0; i < a.size(); ++i)
+            if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i])))
+                return false;
+        return true;
+    }
+
     constexpr int MATE = tt::MATE;
     constexpr int MATE_THRESHOLD = tt::MATE_THRESHOLD;
     constexpr int INTERNAL_PAWN = tuned::MATERIAL[PAWN];
@@ -96,6 +108,8 @@ namespace
     // Keep frequently written atomics on separate cache lines. False sharing
     // would invalidate the line holding stopFlag and reduce throughput.
     alignas(64) std::atomic<bool> stopFlag{false};
+    alignas(64) std::atomic<bool> stopRequested{false};
+    alignas(64) std::atomic<bool> searching{false};
     alignas(64) std::atomic<uint64_t> searchedNodes{0};
     alignas(64) std::atomic<uint64_t> globalNodes{0};
     alignas(64) std::atomic<bool> ponderFlag{false};
@@ -250,7 +264,6 @@ namespace
         if (ponderFlag.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed))
         {
             // A ponder search must not answer before ponderhit or stop.
-            manager::postpone();
             return;
         }
 
@@ -618,13 +631,9 @@ namespace
         std::cout << std::endl;
     }
 
-    void printInfo(int depth, int score, uint64_t nodeCount, long long elapsedMs, const Move *pv, int pvLen, int mpv = 1)
+    // Caller holds outputMutex; a whole MultiPV set must be emitted together.
+    void printInfoLocked(int depth, int score, uint64_t nodeCount, long long elapsedMs, const Move *pv, int pvLen, int mpv)
     {
-        if (silentOutput)
-            return;
-
-        std::lock_guard<std::mutex> lock(outputMutex);
-
         std::cout << "info depth " << depth << " seldepth " << seldepth << " multipv " << mpv;
 
         if (score >= MATE_THRESHOLD)
@@ -645,10 +654,22 @@ namespace
         std::cout << " cpuload " << cpuLoadPermill(elapsedMs);
         std::cout << " time " << elapsedMs;
 
-        std::cout << " pv";
-        for (int i = 0; i < pvLen; ++i)
-            std::cout << ' ' << moveToUci(pv[i]);
+        if (pvLen > 0)
+        {
+            std::cout << " pv";
+            for (int i = 0; i < pvLen; ++i)
+                std::cout << ' ' << moveToUci(pv[i]);
+        }
         std::cout << std::endl;
+    }
+
+    void printInfo(int depth, int score, uint64_t nodeCount, long long elapsedMs, const Move *pv, int pvLen, int mpv = 1)
+    {
+        if (silentOutput)
+            return;
+
+        std::lock_guard<std::mutex> lock(outputMutex);
+        printInfoLocked(depth, score, nodeCount, elapsedMs, pv, pvLen, mpv);
     }
 
     int quiescence(Position &pos, int alpha, int beta, int ply);
@@ -681,6 +702,19 @@ namespace
                 return list.moves[i];
         }
         return Move();
+    }
+
+    // A search stopped before its first completed iteration still has to name
+    // a move and searchmoves has to remain an absolute root restriction.
+    Move fallbackBestMove(const Position &root)
+    {
+        for (Move m : activeLimits.searchmoves)
+        {
+            Position probe = root;
+            if (probe.do_move(m))
+                return m;
+        }
+        return firstLegalMove(root);
     }
 
     // Verifies a table mate score by replaying a forced mate.
@@ -1498,12 +1532,19 @@ namespace
 
     void waitForStop()
     {
-        if (!activeLimits.infinite && !ponderFlag.load(std::memory_order_relaxed))
+        if (activeLimits.infinite)
+        {
+            while (!stopRequested.load(std::memory_order_relaxed))
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             return;
+        }
 
-        while (!stopFlag.load(std::memory_order_relaxed)
-               && std::chrono::steady_clock::now() < manager::deadline())
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (ponderFlag.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed))
+        {
+            while (!stopRequested.load(std::memory_order_relaxed)
+                   && !ponderHitFlag.load(std::memory_order_relaxed))
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
     }
 
     void iterativeDeepening(Position &pos)
@@ -1530,7 +1571,7 @@ namespace
         if (isMain && rootHasLegalMove)
         {
             const tt::Entry *e = tt::probe(pos.zobristKey);
-            if (e != nullptr && e->move != Move())
+            if (e != nullptr && e->move != Move() && inSearchMoves(e->move))
             {
                 const int s = tt::scoreFromTT(e->score, 0);
                 if ((s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD) && hasMateProof(pos, 0, s))
@@ -1573,6 +1614,7 @@ namespace
 
             RootLine lines[search::MULTIPV_MAX];
             int lineCount = 0;
+            bool stoppedIteration = false;
 
             for (int mpv = 1; mpv <= mpvCount; ++mpv)
             {
@@ -1585,6 +1627,7 @@ namespace
 
                 if (stopFlag.load(std::memory_order_relaxed))
                 {
+                    stoppedIteration = true;
                     if (isMain && mpv == 1 && partialBest != Move())
                     {
                         std::lock_guard<std::mutex> lock(bestMutex);
@@ -1615,6 +1658,7 @@ namespace
 
                 if (mateGoal > 0 && score >= MATE_THRESHOLD && (MATE - score + 1) / 2 <= mateGoal)
                 {
+                    stoppedIteration = true;
                     stopFlag.store(true, std::memory_order_relaxed);
                     break;
                 }
@@ -1642,19 +1686,24 @@ namespace
 
                 if (isMain)
                 {
-                    const long long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                                  std::chrono::steady_clock::now() - start)
-                                                  .count();
-                    // Report aggregate nodes plus the unflushed batch so nps scales with
-                    // thread count and shallow searches do not report zero.
-                    const uint64_t reported = searchedNodes.load(std::memory_order_relaxed)
-                                              + static_cast<uint64_t>(nodes & 2047);
-                    for (int i = 0; i < lineCount; ++i)
+                    const bool completeSet = !stoppedIteration || lineCount == mpvCount;
+                    if (completeSet && !silentOutput)
                     {
-                        seldepth = lines[i].seldepth;
-                        printInfo(depth, lines[i].score, reported, elapsed, lines[i].pv, lines[i].pvLength, i + 1);
+                        const long long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                      std::chrono::steady_clock::now() - start)
+                                                      .count();
+                        // Report aggregate nodes plus the unflushed batch so nps scales with
+                        // thread count and shallow searches do not report zero.
+                        const uint64_t reported = searchedNodes.load(std::memory_order_relaxed)
+                                                  + static_cast<uint64_t>(nodes & 2047);
+                        std::lock_guard<std::mutex> lock(outputMutex);
+                        for (int i = 0; i < lineCount; ++i)
+                        {
+                            seldepth = lines[i].seldepth;
+                            printInfoLocked(depth, lines[i].score, reported, elapsed, lines[i].pv, lines[i].pvLength, i + 1);
+                        }
+                        seldepth = lines[0].seldepth;
                     }
-                    seldepth = lines[0].seldepth;
 
                     std::lock_guard<std::mutex> lock(bestMutex);
                     if (depth > completedDepth)
@@ -1673,7 +1722,7 @@ namespace
             if (!rootHasLegalMove)
                 break;
 
-            if (isMain && depth >= 4 &&
+            if (isMain && depth >= 4 && !activeLimits.infinite &&
                 !(ponderFlag.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed)))
             {
                 const Move iterationBest = lineCount > 0 ? lines[0].move : Move();
@@ -1783,11 +1832,13 @@ void search::prepare(const Position &root, const SearchLimits &limits)
     activeUs = root.sideToMove;
     nodesLimit = limits.nodes;
     mateGoal = limits.mate;
-    ponderFlag.store(limits.ponder && ponderSetting, std::memory_order_relaxed);
+    ponderFlag.store(limits.ponder, std::memory_order_relaxed);
     ponderHitFlag.store(false, std::memory_order_relaxed);
+    stopRequested.store(false, std::memory_order_relaxed);
     stopFlag.store(false, std::memory_order_relaxed);
     manager::analyzeRoot(root, static_cast<int>(activeLimits.searchmoves.size()));
     manager::computeDeadline(limits, root.sideToMove);
+    searching.store(true, std::memory_order_relaxed);
 }
 
 void search::go(const Position &root, const SearchLimits &limits)
@@ -1833,11 +1884,18 @@ void search::go(const Position &root, const SearchLimits &limits)
         t.join();
 
     // Never report 0000 while the root position has a legal move.
-    if (finalBestMove == Move())
-        finalBestMove = firstLegalMove(root);
+    if (finalBestMove == Move() || !inSearchMoves(finalBestMove))
+    {
+        finalBestMove = fallbackBestMove(root);
+        finalPonderMove = Move();
+    }
+    searching.store(false, std::memory_order_relaxed);
 
     if (stats::reporting())
+    {
+        std::lock_guard<std::mutex> lock(outputMutex);
         stats::print();
+    }
 
     if (!silentOutput)
     {
@@ -1848,12 +1906,26 @@ void search::go(const Position &root, const SearchLimits &limits)
         std::cout << std::endl;
     }
 
+    ponderFlag.store(false, std::memory_order_relaxed);
+    ponderHitFlag.store(false, std::memory_order_relaxed);
+    stopRequested.store(false, std::memory_order_relaxed);
     stopFlag.store(false, std::memory_order_relaxed);
 }
 
 void search::stop()
 {
+    stopRequested.store(true, std::memory_order_relaxed);
     stopFlag.store(true, std::memory_order_relaxed);
+}
+
+bool search::isRunning()
+{
+    return searching.load(std::memory_order_relaxed);
+}
+
+std::mutex &search::outputLock()
+{
+    return outputMutex;
 }
 
 Move search::bestMove()
@@ -1973,15 +2045,22 @@ void search::ponderhit()
 {
     if (!ponderFlag.load(std::memory_order_relaxed))
         return;
+    if (ponderHitFlag.load(std::memory_order_relaxed))
+        return;
     ponderHitFlag.store(true, std::memory_order_relaxed);
-    manager::computeDeadline(activeLimits, activeUs);
+    manager::computeDeadline(activeLimits, activeUs, true);
+
+    const bool limited = activeLimits.infinite || activeLimits.depth > 0 || activeLimits.nodes > 0
+                         || activeLimits.mate > 0 || activeLimits.softNodes > 0 || manager::budgeted();
+    if (!limited)
+        stopFlag.store(true, std::memory_order_relaxed);
 }
 
 bool search::setTuningOption(const std::string &name, int value)
 {
     for (const TuningParam &p : tuningParams)
     {
-        if (name == p.name)
+        if (sameOptionName(p.name, name))
         {
             *p.value = clampOption(p.name, value, p.minValue, p.maxValue);
             initReductions();

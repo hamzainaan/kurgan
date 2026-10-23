@@ -12,7 +12,7 @@ namespace manager
     void analyzeRoot(const Position &root, int searchMoveCount);
 
     // Computes the time budget for the side to move.
-    void computeDeadline(const search::SearchLimits &limits, Color us);
+    void computeDeadline(const search::SearchLimits &limits, Color us, bool ponderHit = false);
     void setMoveOverhead(int ms);
 
     // Supplies the latest score stability data for time decisions.

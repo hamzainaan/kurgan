@@ -11,13 +11,17 @@
 #include "stats.h"
 #include "version.h"
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -30,6 +34,49 @@ namespace
     };
 
     Opponent opponent;
+    bool debugMode = false;
+
+    std::string asciiLower(std::string text)
+    {
+        std::transform(text.begin(), text.end(), text.begin(),
+                       [](unsigned char c)
+                       { return static_cast<char>(std::tolower(c)); });
+        return text;
+    }
+
+    bool checkValue(const std::string &value)
+    {
+        const std::string lowered = asciiLower(value);
+        return lowered == "true" || lowered == "1";
+    }
+
+    bool parseInteger(const std::string &token, int &value)
+    {
+        try
+        {
+            size_t used = 0;
+            const int parsed = std::stoi(token, &used);
+            if (used != token.size())
+                return false;
+            value = parsed;
+            return true;
+        }
+        catch (const std::exception &)
+        {
+            return false;
+        }
+    }
+
+    bool isGoKeyword(const std::string &token)
+    {
+        static const char *const keywords[] = {
+            "searchmoves", "ponder", "wtime", "btime", "winc", "binc",
+            "movestogo", "depth", "nodes", "mate", "movetime", "infinite"};
+        for (const char *keyword : keywords)
+            if (token == keyword)
+                return true;
+        return false;
+    }
 
     void setOpponent(const std::string &value)
     {
@@ -81,7 +128,7 @@ namespace
     // Matches a UCI move string against the pseudo-legal move list.
     Move parseMove(const Position &pos, const std::string &s)
     {
-        if (s.size() < 4)
+        if (s.size() != 4 && s.size() != 5)
             return Move();
 
         const int fromFile = s[0] - 'a';
@@ -97,9 +144,9 @@ namespace
         const Square to = makeSquare(static_cast<File>(toFile), static_cast<Rank>(toRank));
 
         PieceType promo = NO_PIECE_TYPE;
-        if (s.size() >= 5)
+        if (s.size() == 5)
         {
-            switch (s[4])
+            switch (static_cast<char>(std::tolower(static_cast<unsigned char>(s[4]))))
             {
             case 'n':
                 promo = KNIGHT;
@@ -110,9 +157,11 @@ namespace
             case 'r':
                 promo = ROOK;
                 break;
-            default:
+            case 'q':
                 promo = QUEEN;
                 break;
+            default:
+                return Move();
             }
         }
 
@@ -129,6 +178,8 @@ namespace
 
             if (m.isCastling())
             {
+                if (promo != NO_PIECE_TYPE)
+                    continue;
                 if (movegen::chess960() ? m.to() == to
                                         : (to == castlingKingTo(m) || to == m.to()))
                     return m;
@@ -187,8 +238,13 @@ namespace
                 fen += part;
             }
 
-            if (!pos.set_fen(fen))
+            Position parsed = pos;
+            if (!parsed.set_fen(fen))
+            {
                 std::cout << "info string invalid fen '" << fen << '\'' << std::endl;
+                return;
+            }
+            pos = parsed;
         }
         else
         {
@@ -219,48 +275,64 @@ namespace
     search::SearchLimits parseGo(std::istringstream &ss, const Position &pos)
     {
         search::SearchLimits limits;
+        std::vector<std::string> tokens;
         std::string token;
         while (ss >> token)
+            tokens.push_back(token);
+
+        int requestedSearchMoves = 0;
+        for (size_t i = 0; i < tokens.size(); ++i)
         {
-            if (token == "depth")
-                ss >> limits.depth;
-            else if (token == "movetime")
-                ss >> limits.movetime;
-            else if (token == "wtime")
-                ss >> limits.wtime;
-            else if (token == "btime")
-                ss >> limits.btime;
-            else if (token == "winc")
-                ss >> limits.winc;
-            else if (token == "binc")
-                ss >> limits.binc;
-            else if (token == "movestogo")
-                ss >> limits.movestogo;
-            else if (token == "nodes")
-                ss >> limits.nodes;
-            else if (token == "mate")
-                ss >> limits.mate;
-            else if (token == "ponder")
+            const std::string &current = tokens[i];
+            int value = 0;
+
+            if (current == "ponder")
                 limits.ponder = true;
-            else if (token == "infinite")
+            else if (current == "infinite")
                 limits.infinite = true;
-            else if (token == "searchmoves")
+            else if (current == "searchmoves")
             {
-                std::string moveStr;
-                int requested = 0;
-                while (ss >> moveStr)
+                while (i + 1 < tokens.size() && !isGoKeyword(tokens[i + 1]))
                 {
-                    ++requested;
-                    const Move m = parseMove(pos, moveStr);
+                    ++i;
+                    ++requestedSearchMoves;
+                    const Move m = parseMove(pos, tokens[i]);
                     if (m.from() == m.to())
-                        std::cout << "info string invalid searchmoves '" << moveStr << '\'' << std::endl;
+                        std::cout << "info string invalid searchmoves '" << tokens[i] << '\'' << std::endl;
                     else
                         limits.searchmoves.push_back(m);
                 }
-                if (requested > 0 && limits.searchmoves.empty())
-                    std::cout << "info string no legal searchmoves, searching all moves" << std::endl;
+            }
+            else if (i + 1 < tokens.size() && parseInteger(tokens[i + 1], value))
+            {
+                if (current == "depth")
+                    limits.depth = std::max(1, value);
+                else if (current == "movetime")
+                    limits.movetime = std::max(1, value);
+                else if (current == "wtime")
+                    limits.wtime = std::max(1, value);
+                else if (current == "btime")
+                    limits.btime = std::max(1, value);
+                else if (current == "winc")
+                    limits.winc = std::max(0, value);
+                else if (current == "binc")
+                    limits.binc = std::max(0, value);
+                else if (current == "movestogo")
+                    limits.movestogo = std::max(0, value);
+                else if (current == "nodes")
+                    limits.nodes = std::max(1, value);
+                else if (current == "mate")
+                    limits.mate = std::max(0, value);
+                else
+                    continue;
+
+                ++i;
             }
         }
+
+        if (requestedSearchMoves > 0 && limits.searchmoves.empty())
+            std::cout << "info string no legal searchmoves, searching all moves" << std::endl;
+
         return limits;
     }
 }
@@ -286,15 +358,31 @@ void uci::loop()
         }
     };
 
+    auto searchRunning = [&]()
+    {
+        return searchActive && search::isRunning();
+    };
+
     std::string line;
     while (std::getline(std::cin, line))
     {
+        // Windows GUIs may deliver CRLF while another OS uses LF (or 0x0a0c).
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+
         std::istringstream ss(line);
         std::string cmd;
         ss >> cmd;
 
+        if (debugMode && !cmd.empty())
+        {
+            std::lock_guard<std::mutex> lock(search::outputLock());
+            std::cout << "info string " << line << std::endl;
+        }
+
         if (cmd == "uci")
         {
+            std::lock_guard<std::mutex> lock(search::outputLock());
             std::cout << "id name Kurgan " << KURGAN_VERSION << std::endl;
             std::cout << "id author Hamza Inan" << std::endl;
             std::cout << "option name Threads type spin default 1 min " << search::THREADS_MIN
@@ -325,15 +413,22 @@ void uci::loop()
         }
         else if (cmd == "isready")
         {
+            std::lock_guard<std::mutex> lock(search::outputLock());
             std::cout << "readyok" << std::endl;
         }
         else if (cmd == "ucinewgame")
         {
+            if (searchRunning())
+                continue;
             joinSearch();
             search::clear();
         }
         else if (cmd == "setoption")
         {
+            // UCI only sends setoption while the engine is waiting.
+            if (searchRunning())
+                continue;
+
             std::string name;
             std::string value;
             std::string token;
@@ -367,34 +462,36 @@ void uci::loop()
 
             joinSearch();
 
+            const std::string key = asciiLower(name);
+
             try
             {
-                if (name == "Hash")
+                if (key == "hash")
                     search::setHashSize(std::stoi(value));
-                else if (name == "Threads")
+                else if (key == "threads")
                     search::setThreads(std::stoi(value));
-                else if (name == "Ponder")
-                    search::setPonder(value == "true");
-                else if (name == "UCI_Chess960")
-                    movegen::setChess960(value == "true");
-                else if (name == "MultiPV")
+                else if (key == "ponder")
+                    search::setPonder(checkValue(value));
+                else if (key == "uci_chess960")
+                    movegen::setChess960(checkValue(value));
+                else if (key == "multipv")
                     search::setMultiPV(std::stoi(value));
-                else if (name == "Contempt")
+                else if (key == "contempt")
                     search::setContempt(std::stoi(value));
-                else if (name == "UCI_AnalyseMode")
-                    search::setAnalyseMode(value == "true");
-                else if (name == "UCI_ShowRefutations")
-                    search::setShowRefutations(value == "true");
-                else if (name == "UCI_Opponent")
+                else if (key == "uci_analysemode")
+                    search::setAnalyseMode(checkValue(value));
+                else if (key == "uci_showrefutations")
+                    search::setShowRefutations(checkValue(value));
+                else if (key == "uci_opponent")
                     setOpponent(value);
-                else if (name == "Move Overhead")
+                else if (key == "move overhead")
                     search::setMoveOverhead(std::stoi(value));
-                else if (name == "Clear Hash")
+                else if (key == "clear hash")
                     search::clear();
-                else if (name == "Use NNUE")
-                    nnue::setEnabled(value == "true");
-                else if (name == "Search Stats")
-                    stats::setReporting(value == "true");
+                else if (key == "use nnue")
+                    nnue::setEnabled(checkValue(value));
+                else if (key == "search stats")
+                    stats::setReporting(checkValue(value));
                 else if (!search::setTuningOption(name, std::stoi(value)))
                     std::cout << "info string unknown option " << name << std::endl;
             }
@@ -405,11 +502,15 @@ void uci::loop()
         }
         else if (cmd == "position")
         {
+            if (searchRunning())
+                continue;
             joinSearch();
             parsePosition(ss, pos);
         }
         else if (cmd == "go")
         {
+            if (searchRunning())
+                continue;
             joinSearch();
             const search::SearchLimits limits = parseGo(ss, pos);
             search::prepare(pos, limits);
@@ -419,15 +520,24 @@ void uci::loop()
         }
         else if (cmd == "stop")
         {
-            search::stop();
-            joinSearch();
+            // stop outside a search is ignored.
+            if (searchRunning())
+            {
+                search::stop();
+                joinSearch();
+            }
+            else
+                joinSearch();
         }
         else if (cmd == "ponderhit")
         {
-            search::ponderhit();
+            if (searchRunning())
+                search::ponderhit();
         }
         else if (cmd == "perft")
         {
+            if (searchRunning())
+                continue;
             joinSearch();
 
             std::string arg;
@@ -466,6 +576,8 @@ void uci::loop()
         }
         else if (cmd == "eval")
         {
+            if (searchRunning())
+                continue;
             joinSearch();
 #ifdef KURGAN_HCE_OFF
             std::cout << "eval " << evaluate::evaluate(pos) << std::endl;
@@ -478,18 +590,33 @@ void uci::loop()
         }
         else if (cmd == "debug")
         {
-            joinSearch();
-
             std::string arg;
             ss >> arg;
-            if (arg != "on" && arg != "off")
+
+            if (arg == "on")
             {
+                if (!debugMode)
+                {
+                    debugMode = true;
+                    std::lock_guard<std::mutex> lock(search::outputLock());
+                    std::cout << "info string debug on" << std::endl;
+                }
+            }
+            else if (arg == "off")
+            {
+                debugMode = false;
+            }
+            else if (arg.empty() && !searchRunning())
+            {
+                std::lock_guard<std::mutex> lock(search::outputLock());
                 pos.print_board();
                 std::cout << "Fen: " << pos.fen() << std::endl;
             }
         }
         else if (cmd == "bench")
         {
+            if (searchRunning())
+                continue;
             joinSearch();
             int depth = 0;
             ss >> depth;
@@ -497,6 +624,8 @@ void uci::loop()
         }
         else if (cmd == "datagen")
         {
+            if (searchRunning())
+                continue;
             joinSearch();
             datagen::Options options;
             std::string key;
@@ -525,10 +654,13 @@ void uci::loop()
         }
         else if (cmd == "quit")
         {
-            search::stop();
+            if (searchRunning())
+                search::stop();
             break;
         }
     }
 
+    // End of input is equivalent to quit.
+    search::stop();
     joinSearch();
 }
