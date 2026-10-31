@@ -503,42 +503,73 @@ namespace
         bool qsearch = false;
         int lastHistory = 0;
 
+        const MoveList *source = nullptr;
+        Move counter{};
+        int ply = 0;
+        bool ttPending = false;
+        bool scored = false;
+
         void init(const Position &pos, const MoveList &list, Move ttBest, Move counterMove,
-                  int ply, bool capturesOnly)
+                  int plyIndex, bool capturesOnly)
         {
-            ttMove = ttBest;
+            source = &list;
+            counter = counterMove;
+            ply = plyIndex;
             qsearch = capturesOnly;
             count = 0;
             index = 0;
             deferredCount = 0;
             deferredIndex = 0;
+            scored = false;
 
+            ttMove = Move();
+            ttPending = false;
+            if (ttBest != Move() && (!capturesOnly || movegen::isTactical(pos, ttBest)))
+                for (int i = 0; i < list.size; ++i)
+                    if (list.moves[i] == ttBest)
+                    {
+                        ttMove = ttBest;
+                        ttPending = true;
+                        break;
+                    }
+        }
+
+        int historyOf(const Position &pos, Move m) const
+        {
+            return movegen::isTactical(pos, m) ? captureHistoryEntry(pos, m) : quietHistoryScore(pos, m, ply);
+        }
+
+        void score(const Position &pos)
+        {
+            scored = true;
+            const MoveList &list = *source;
             for (int i = 0; i < list.size; ++i)
             {
                 const Move m = list.moves[i];
+                if (m == ttMove)
+                    continue;
+
                 const bool tactical = movegen::isTactical(pos, m);
-                if (capturesOnly && !tactical)
+                if (qsearch && !tactical)
                     continue;
 
                 const int h = tactical ? captureHistoryEntry(pos, m) : quietHistoryScore(pos, m, ply);
-                int score;
-                if (m == ttMove)
-                    score = TT_MOVE_SCORE;
-                else if (m.isPromotion() && m.promoType() != QUEEN)
-                    score = h;
+                int value;
+                if (m.isPromotion() && m.promoType() != QUEEN)
+                    value = h;
                 else if (tactical)
-                    score = CAPTURE_BAND + captureScore(pos, m);
+                    value = CAPTURE_BAND + captureScore(pos, m);
                 else if (m == killers[0][ply])
-                    score = KILLER1_SCORE;
+                    value = KILLER1_SCORE;
                 else if (m == killers[1][ply])
-                    score = KILLER2_SCORE;
-                else if (m == counterMove)
-                    score = COUNTERMOVE_SCORE;
+                    value = KILLER2_SCORE;
+                else if (m == counter)
+                    value = COUNTERMOVE_SCORE;
                 else
-                    score = h;
+                    value = h;
 
-                const int64_t rank = static_cast<int64_t>(score) * 65536 + (65535 - count);
-                moves[count] = {score, m, static_cast<uint16_t>(count), h, rank};
+                const int64_t rank = static_cast<int64_t>(value) * 65536 + (65535 - count);
+                moves[count] = {value, m, static_cast<uint16_t>(count), h, rank};
                 ++count;
             }
         }
@@ -560,6 +591,17 @@ namespace
         // Returns the next move to search, or Move when the node is exhausted.
         Move next(const Position &pos)
         {
+            if (ttPending)
+            {
+                ttPending = false;
+                lastSeeValid = false;
+                lastHistory = historyOf(pos, ttMove);
+                return ttMove;
+            }
+
+            if (!scored)
+                score(pos);
+
             while (index < count)
             {
                 selectBest();
@@ -568,7 +610,7 @@ namespace
                 lastSeeValid = false;
                 lastHistory = sm.history;
 
-                if (m == ttMove || sm.score < CAPTURE_BAND)
+                if (sm.score < CAPTURE_BAND)
                     return m;
 
                 lastSee = see::ge(pos, m, qsearch ? 0 : -(sm.score - CAPTURE_BAND) / tuned::SEE_ORDER_DIV) ? 1 : -1;
