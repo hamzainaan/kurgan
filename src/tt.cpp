@@ -154,6 +154,16 @@ void tt::newSearch()
     generation = (generation + 1) & 63;
 }
 
+void tt::prefetch(uint64_t key)
+{
+#if defined(__GNUC__) || defined(__clang__)
+    if (table != nullptr)
+        __builtin_prefetch(&table[key & clusterMask]);
+#else
+    (void)key;
+#endif
+}
+
 tt::Entry *tt::probe(uint64_t key)
 {
     if (table == nullptr)

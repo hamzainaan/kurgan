@@ -91,8 +91,13 @@ namespace
     constexpr int INTERNAL_PAWN = tuned::MATERIAL[PAWN];
     constexpr int UCI_PAWN = 100;
 
+    constexpr int DRAW_JITTER = 1;
+
     int toCentipawns(int score)
     {
+        if (score >= -DRAW_JITTER && score <= DRAW_JITTER)
+            return 0;
+
         const int scaled = score * UCI_PAWN;
         return scaled >= 0 ? (scaled + INTERNAL_PAWN / 2) / INTERNAL_PAWN
                            : -((-scaled + INTERNAL_PAWN / 2) / INTERNAL_PAWN);
@@ -313,6 +318,55 @@ namespace
                (movegen::attacks(ROOK, ksq, occ) & ours & (pos.byType[ROOK] | pos.byType[QUEEN])) != 0;
     }
 
+    struct CheckInfo
+    {
+        bool ready = false;
+        Bitboard squares[PIECE_TYPE_NB]{};
+        Bitboard discoverers = 0;
+    };
+
+    void computeCheckInfo(const Position &pos, CheckInfo &ci)
+    {
+        ci.ready = true;
+        const Color us = pos.sideToMove;
+        const Color them = static_cast<Color>(us ^ 1);
+        const Square ksq = pos.kingSquare(them);
+        if (ksq == SQ_NONE)
+            return;
+
+        const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
+        ci.squares[PAWN] = movegen::pawnAttacksFrom(them, ksq);
+        ci.squares[KNIGHT] = movegen::attacks(KNIGHT, ksq, occ);
+        ci.squares[BISHOP] = movegen::attacks(BISHOP, ksq, occ);
+        ci.squares[ROOK] = movegen::attacks(ROOK, ksq, occ);
+        ci.squares[QUEEN] = ci.squares[BISHOP] | ci.squares[ROOK];
+
+        const Bitboard ours = pos.byColor[us];
+        const Bitboard kingBit = 1ULL << ksq;
+        for (int i = 0; i < 2; ++i)
+        {
+            const PieceType slider = i == 0 ? BISHOP : ROOK;
+            Bitboard snipers = movegen::attacks(slider, ksq, 0) & ours & (pos.byType[slider] | pos.byType[QUEEN]);
+            while (snipers)
+            {
+                const Square s = popLsb(snipers);
+                const Bitboard between = movegen::attacks(slider, ksq, 1ULL << s)
+                                         & movegen::attacks(slider, s, kingBit) & occ;
+                if (between && !(between & (between - 1)) && (between & ours))
+                    ci.discoverers |= between;
+            }
+        }
+    }
+
+    bool givesCheck(const Position &pos, Move m, CheckInfo &ci)
+    {
+        if (!ci.ready)
+            computeCheckInfo(pos, ci);
+        if (m.type() != NORMAL || (ci.discoverers & (1ULL << m.from())))
+            return givesCheck(pos, m);
+        return (ci.squares[typeOf(pos.board[m.from()])] & (1ULL << m.to())) != 0;
+    }
+
     int &captureHistoryEntry(const Position &pos, Move m)
     {
         return captureHistory[pos.board[m.from()]][m.to()][typeOf(victimOf(pos, m))];
@@ -471,6 +525,7 @@ namespace
         Move move;
         uint16_t order; // Generation index used as a stable tie-break.
         int history;
+        int64_t rank;
     };
 
     struct RootLine
@@ -502,69 +557,158 @@ namespace
         bool qsearch = false;
         int lastHistory = 0;
 
+        const MoveList *source = nullptr;
+        Move counter{};
+        int ply = 0;
+        bool ttPending = false;
+        bool tacticalScored = false;
+        bool quietsScored = false;
+
         void init(const Position &pos, const MoveList &list, Move ttBest, Move counterMove,
-                  int ply, bool capturesOnly)
+                  int plyIndex, bool capturesOnly)
         {
-            ttMove = ttBest;
+            source = &list;
+            counter = counterMove;
+            ply = plyIndex;
             qsearch = capturesOnly;
             count = 0;
             index = 0;
             deferredCount = 0;
             deferredIndex = 0;
+            tacticalScored = false;
+            quietsScored = capturesOnly;
 
+            ttMove = Move();
+            ttPending = false;
+            if (ttBest != Move() && (!capturesOnly || movegen::isTactical(pos, ttBest)))
+                for (int i = 0; i < list.size; ++i)
+                    if (list.moves[i] == ttBest)
+                    {
+                        ttMove = ttBest;
+                        ttPending = true;
+                        break;
+                    }
+        }
+
+        int historyOf(const Position &pos, Move m) const
+        {
+            return movegen::isTactical(pos, m) ? captureHistoryEntry(pos, m) : quietHistoryScore(pos, m, ply);
+        }
+
+        void score(const Position &pos, bool tacticalPhase)
+        {
+            if (tacticalPhase)
+                tacticalScored = true;
+            else
+                quietsScored = true;
+
+            const MoveList &list = *source;
             for (int i = 0; i < list.size; ++i)
             {
                 const Move m = list.moves[i];
+                if (m == ttMove)
+                    continue;
+
                 const bool tactical = movegen::isTactical(pos, m);
-                if (capturesOnly && !tactical)
+                if (tactical != tacticalPhase)
                     continue;
 
                 const int h = tactical ? captureHistoryEntry(pos, m) : quietHistoryScore(pos, m, ply);
-                int score;
-                if (m == ttMove)
-                    score = TT_MOVE_SCORE;
-                else if (m.isPromotion() && m.promoType() != QUEEN)
-                    score = h;
+                int value;
+                if (m.isPromotion() && m.promoType() != QUEEN)
+                    value = h;
                 else if (tactical)
-                    score = CAPTURE_BAND + captureScore(pos, m);
+                    value = CAPTURE_BAND + captureScore(pos, m);
                 else if (m == killers[0][ply])
-                    score = KILLER1_SCORE;
+                    value = KILLER1_SCORE;
                 else if (m == killers[1][ply])
-                    score = KILLER2_SCORE;
-                else if (m == counterMove)
-                    score = COUNTERMOVE_SCORE;
+                    value = KILLER2_SCORE;
+                else if (m == counter)
+                    value = COUNTERMOVE_SCORE;
                 else
-                    score = h;
+                    value = h;
 
-                moves[count++] = {score, m, static_cast<uint16_t>(count), h};
+                const int64_t rank = static_cast<int64_t>(value) * 65536 + (65535 - i);
+                moves[count] = {value, m, static_cast<uint16_t>(i), h, rank};
+                ++count;
             }
+        }
 
-
-            for (int i = 1; i < count; ++i)
-            {
-                const ScoredMove key = moves[i];
-                int j = i - 1;
-                while (j >= 0 && (moves[j].score < key.score
-                                  || (moves[j].score == key.score && moves[j].order > key.order)))
+        void selectBest()
+        {
+            int best = index;
+            int64_t bestRank = moves[index].rank;
+            for (int j = index + 1; j < count; ++j)
+                if (moves[j].rank > bestRank)
                 {
-                    moves[j + 1] = moves[j];
-                    --j;
+                    best = j;
+                    bestRank = moves[j].rank;
                 }
-                moves[j + 1] = key;
+            if (best != index)
+                std::swap(moves[index], moves[best]);
+        }
+
+        int skipQuiets(const Position &pos, Move excluded)
+        {
+            int dropped = 0;
+            if (!quietsScored)
+            {
+                quietsScored = true;
+                const MoveList &list = *source;
+                for (int i = 0; i < list.size; ++i)
+                {
+                    const Move m = list.moves[i];
+                    if (m != ttMove && m != excluded && !movegen::isTactical(pos, m))
+                        ++dropped;
+                }
             }
+
+            int kept = index;
+            for (int j = index; j < count; ++j)
+            {
+                if (movegen::isTactical(pos, moves[j].move))
+                    moves[kept++] = moves[j];
+                else if (moves[j].move != excluded)
+                    ++dropped;
+            }
+            count = kept;
+            return dropped;
         }
 
         // Returns the next move to search, or Move when the node is exhausted.
         Move next(const Position &pos)
         {
-            while (index < count)
+            if (ttPending)
             {
+                ttPending = false;
+                lastSeeValid = false;
+                lastHistory = historyOf(pos, ttMove);
+                return ttMove;
+            }
+
+            if (!tacticalScored)
+                score(pos, true);
+
+            while (true)
+            {
+                if (index < count)
+                    selectBest();
+
+                if (!quietsScored && (index >= count || moves[index].score < CAPTURE_BAND))
+                {
+                    score(pos, false);
+                    continue;
+                }
+
+                if (index >= count)
+                    break;
+
                 const ScoredMove sm = moves[index++];
                 const Move m = sm.move;
                 lastSeeValid = false;
                 lastHistory = sm.history;
 
-                if (m == ttMove || sm.score < CAPTURE_BAND)
+                if (sm.score < CAPTURE_BAND)
                     return m;
 
                 lastSee = see::ge(pos, m, qsearch ? 0 : -(sm.score - CAPTURE_BAND) / tuned::SEE_ORDER_DIV) ? 1 : -1;
@@ -777,6 +921,9 @@ namespace
 
     int alphaBeta(Position &pos, int depth, int alpha, int beta, int ply, bool pvNode, bool cutNode)
     {
+        if (depth <= 0)
+            return quiescence(pos, alpha, beta, ply);
+
         // Each node owns one PV slot. Reset it before any early return so a
         // parent cannot copy stale moves into its line.
         pvLength[ply] = ply;
@@ -809,7 +956,7 @@ namespace
         const Move counter = prevMove == Move() ? Move() : counterMoveEntry(us, prevMove);
 
         if (ply > 0 && (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos) || pos.isRepetition(ply)))
-            return drawScore(pos) + 1 - static_cast<int>(nodes & 2);
+            return drawScore(pos) + DRAW_JITTER - static_cast<int>(nodes & 2);
 
         const tt::Entry *tte = excluded == Move() ? tt::probe(key) : nullptr;
         const bool ttHit = tte != nullptr;
@@ -845,9 +992,6 @@ namespace
                 }
             }
         }
-
-        if (depth <= 0)
-            return quiescence(pos, alpha, beta, ply);
 
         const bool ttPv = pvNode || (ttHit && tte->pv());
 
@@ -1004,6 +1148,7 @@ namespace
         int searchedCaptureCount = 0;
 
         int moveCount = 0;
+        CheckInfo checkInfo;
         ++stats::current().listNodes;
         for (Move m = picker.next(pos); m != Move(); m = picker.next(pos))
         {
@@ -1011,20 +1156,25 @@ namespace
                 continue;
 
             const bool quiet = !movegen::isTactical(pos, m);
-            const bool checks = givesCheck(pos, m);
             const int histScore = picker.lastHistory;
             ++moveCount;
 
-            if (ply > 0 && !shallowSearch && hasNonPawn && bestScore > -MATE_THRESHOLD)
+            const bool canPrune = ply > 0 && !shallowSearch && hasNonPawn && bestScore > -MATE_THRESHOLD;
+
+            if (canPrune && quiet && !inCheck && depth <= tuned::LMP_DEPTH &&
+                moveCount > (tuned::LMP_BASE + depth * depth) / (2 - improving))
+            {
+                const int skipped = picker.skipQuiets(pos, excluded);
+                moveCount += skipped;
+                stats::current().lmpPruned += static_cast<uint64_t>(1 + skipped);
+                continue;
+            }
+
+            const bool checks = givesCheck(pos, m, checkInfo);
+
+            if (canPrune)
             {
                 const int lmrDepth = std::max(0, depth - 1 - lmrTable[std::min(depth, MAX_DEPTH - 1)][std::min(moveCount, 63)]);
-
-                if (quiet && !inCheck && depth <= tuned::LMP_DEPTH &&
-                    moveCount > (tuned::LMP_BASE + depth * depth) / (2 - improving))
-                {
-                    ++stats::current().lmpPruned;
-                    continue;
-                }
 
                 if (quiet && !checks)
                 {
@@ -1346,6 +1496,7 @@ namespace
         picker.init(pos, list, ttMove, counter, ply, !inCheck);
 
         const int futilityBase = standPat + tuned::QS_FUTILITY_MARGIN;
+        CheckInfo checkInfo;
         Move bestMove{};
         int legalMoves = 0;
         for (Move m = picker.next(pos); m != Move(); m = picker.next(pos))
@@ -1359,7 +1510,7 @@ namespace
                     continue;
                 }
 
-                if (!m.isPromotion() && !givesCheck(pos, m))
+                if (!m.isPromotion() && !givesCheck(pos, m, checkInfo))
                 {
                     const int futility = futilityBase + pieceValue(typeOf(victimOf(pos, m)));
                     if (futility <= alpha)
