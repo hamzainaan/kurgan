@@ -777,6 +777,9 @@ namespace
 
     int alphaBeta(Position &pos, int depth, int alpha, int beta, int ply, bool pvNode, bool cutNode)
     {
+        if (depth <= 0)
+            return quiescence(pos, alpha, beta, ply);
+
         // Each node owns one PV slot. Reset it before any early return so a
         // parent cannot copy stale moves into its line.
         pvLength[ply] = ply;
@@ -845,9 +848,6 @@ namespace
                 }
             }
         }
-
-        if (depth <= 0)
-            return quiescence(pos, alpha, beta, ply);
 
         const bool ttPv = pvNode || (ttHit && tte->pv());
 
