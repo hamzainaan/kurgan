@@ -313,6 +313,55 @@ namespace
                (movegen::attacks(ROOK, ksq, occ) & ours & (pos.byType[ROOK] | pos.byType[QUEEN])) != 0;
     }
 
+    struct CheckInfo
+    {
+        bool ready = false;
+        Bitboard squares[PIECE_TYPE_NB]{};
+        Bitboard discoverers = 0;
+    };
+
+    void computeCheckInfo(const Position &pos, CheckInfo &ci)
+    {
+        ci.ready = true;
+        const Color us = pos.sideToMove;
+        const Color them = static_cast<Color>(us ^ 1);
+        const Square ksq = pos.kingSquare(them);
+        if (ksq == SQ_NONE)
+            return;
+
+        const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
+        ci.squares[PAWN] = movegen::pawnAttacksFrom(them, ksq);
+        ci.squares[KNIGHT] = movegen::attacks(KNIGHT, ksq, occ);
+        ci.squares[BISHOP] = movegen::attacks(BISHOP, ksq, occ);
+        ci.squares[ROOK] = movegen::attacks(ROOK, ksq, occ);
+        ci.squares[QUEEN] = ci.squares[BISHOP] | ci.squares[ROOK];
+
+        const Bitboard ours = pos.byColor[us];
+        const Bitboard kingBit = 1ULL << ksq;
+        for (int i = 0; i < 2; ++i)
+        {
+            const PieceType slider = i == 0 ? BISHOP : ROOK;
+            Bitboard snipers = movegen::attacks(slider, ksq, 0) & ours & (pos.byType[slider] | pos.byType[QUEEN]);
+            while (snipers)
+            {
+                const Square s = popLsb(snipers);
+                const Bitboard between = movegen::attacks(slider, ksq, 1ULL << s)
+                                         & movegen::attacks(slider, s, kingBit) & occ;
+                if (between && !(between & (between - 1)) && (between & ours))
+                    ci.discoverers |= between;
+            }
+        }
+    }
+
+    bool givesCheck(const Position &pos, Move m, CheckInfo &ci)
+    {
+        if (!ci.ready)
+            computeCheckInfo(pos, ci);
+        if (m.type() != NORMAL || (ci.discoverers & (1ULL << m.from())))
+            return givesCheck(pos, m);
+        return (ci.squares[typeOf(pos.board[m.from()])] & (1ULL << m.to())) != 0;
+    }
+
     int &captureHistoryEntry(const Position &pos, Move m)
     {
         return captureHistory[pos.board[m.from()]][m.to()][typeOf(victimOf(pos, m))];
@@ -1094,6 +1143,7 @@ namespace
         int searchedCaptureCount = 0;
 
         int moveCount = 0;
+        CheckInfo checkInfo;
         ++stats::current().listNodes;
         for (Move m = picker.next(pos); m != Move(); m = picker.next(pos))
         {
@@ -1115,7 +1165,7 @@ namespace
                 continue;
             }
 
-            const bool checks = givesCheck(pos, m);
+            const bool checks = givesCheck(pos, m, checkInfo);
 
             if (canPrune)
             {
@@ -1441,6 +1491,7 @@ namespace
         picker.init(pos, list, ttMove, counter, ply, !inCheck);
 
         const int futilityBase = standPat + tuned::QS_FUTILITY_MARGIN;
+        CheckInfo checkInfo;
         Move bestMove{};
         int legalMoves = 0;
         for (Move m = picker.next(pos); m != Move(); m = picker.next(pos))
@@ -1454,7 +1505,7 @@ namespace
                     continue;
                 }
 
-                if (!m.isPromotion() && !givesCheck(pos, m))
+                if (!m.isPromotion() && !givesCheck(pos, m, checkInfo))
                 {
                     const int futility = futilityBase + pieceValue(typeOf(victimOf(pos, m)));
                     if (futility <= alpha)
