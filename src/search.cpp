@@ -594,6 +594,33 @@ namespace
                 std::swap(moves[index], moves[best]);
         }
 
+        int skipQuiets(const Position &pos, Move excluded)
+        {
+            int dropped = 0;
+            if (!quietsScored)
+            {
+                quietsScored = true;
+                const MoveList &list = *source;
+                for (int i = 0; i < list.size; ++i)
+                {
+                    const Move m = list.moves[i];
+                    if (m != ttMove && m != excluded && !movegen::isTactical(pos, m))
+                        ++dropped;
+                }
+            }
+
+            int kept = index;
+            for (int j = index; j < count; ++j)
+            {
+                if (movegen::isTactical(pos, moves[j].move))
+                    moves[kept++] = moves[j];
+                else if (moves[j].move != excluded)
+                    ++dropped;
+            }
+            count = kept;
+            return dropped;
+        }
+
         // Returns the next move to search, or Move when the node is exhausted.
         Move next(const Position &pos)
         {
@@ -1082,7 +1109,9 @@ namespace
             if (canPrune && quiet && !inCheck && depth <= tuned::LMP_DEPTH &&
                 moveCount > (tuned::LMP_BASE + depth * depth) / (2 - improving))
             {
-                ++stats::current().lmpPruned;
+                const int skipped = picker.skipQuiets(pos, excluded);
+                moveCount += skipped;
+                stats::current().lmpPruned += static_cast<uint64_t>(1 + skipped);
                 continue;
             }
 
