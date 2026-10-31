@@ -1,5 +1,6 @@
 #include "position.h"
 #include "movegen.h"
+#include "tt.h"
 
 #include <algorithm>
 #include <iostream>
@@ -296,6 +297,8 @@ bool Position::do_move(Move move)
     zobristKey ^= castlingKeys[undo.prevCastlingRights] ^ castlingKeys[castlingRights];
     zobristKey ^= epKey(undo.prevEnPassantSquare) ^ epKey(enPassantSquare);
 
+    tt::prefetch(zobristKey);
+
     // An irreversible move resets the repetition window.
     if (pt == PAWN || undo.capturedPiece != NO_PIECE)
         historyStart = historyCount;
@@ -383,6 +386,7 @@ void Position::do_null_move()
     sideToMove = static_cast<Color>(sideToMove ^ 1);
 
     zobristKey ^= sideKey ^ epKey(undo.prevEnPassantSquare);
+    tt::prefetch(zobristKey);
 
     historyStart = historyCount;
     historyKeys[historyCount & (MAX_HISTORY - 1)] = zobristKey;

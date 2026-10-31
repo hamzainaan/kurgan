@@ -58,6 +58,8 @@ namespace tt
 
     Entry *probe(uint64_t key);
 
+    void prefetch(uint64_t key);
+
     void store(uint64_t key, Move move, int score, int depth, int bound, int ply, int eval = NO_EVAL, bool pv = false);
 
     // Returns approximate table usage in parts per thousand.
