@@ -471,6 +471,7 @@ namespace
         Move move;
         uint16_t order; // Generation index used as a stable tie-break.
         int history;
+        int64_t rank;
     };
 
     struct RootLine
@@ -536,22 +537,24 @@ namespace
                 else
                     score = h;
 
-                moves[count++] = {score, m, static_cast<uint16_t>(count), h};
+                const int64_t rank = static_cast<int64_t>(score) * 65536 + (65535 - count);
+                moves[count] = {score, m, static_cast<uint16_t>(count), h, rank};
+                ++count;
             }
+        }
 
-
-            for (int i = 1; i < count; ++i)
-            {
-                const ScoredMove key = moves[i];
-                int j = i - 1;
-                while (j >= 0 && (moves[j].score < key.score
-                                  || (moves[j].score == key.score && moves[j].order > key.order)))
+        void selectBest()
+        {
+            int best = index;
+            int64_t bestRank = moves[index].rank;
+            for (int j = index + 1; j < count; ++j)
+                if (moves[j].rank > bestRank)
                 {
-                    moves[j + 1] = moves[j];
-                    --j;
+                    best = j;
+                    bestRank = moves[j].rank;
                 }
-                moves[j + 1] = key;
-            }
+            if (best != index)
+                std::swap(moves[index], moves[best]);
         }
 
         // Returns the next move to search, or Move when the node is exhausted.
@@ -559,6 +562,7 @@ namespace
         {
             while (index < count)
             {
+                selectBest();
                 const ScoredMove sm = moves[index++];
                 const Move m = sm.move;
                 lastSeeValid = false;
