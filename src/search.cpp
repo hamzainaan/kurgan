@@ -91,8 +91,13 @@ namespace
     constexpr int INTERNAL_PAWN = tuned::MATERIAL[PAWN];
     constexpr int UCI_PAWN = 100;
 
+    constexpr int DRAW_JITTER = 1;
+
     int toCentipawns(int score)
     {
+        if (score >= -DRAW_JITTER && score <= DRAW_JITTER)
+            return 0;
+
         const int scaled = score * UCI_PAWN;
         return scaled >= 0 ? (scaled + INTERNAL_PAWN / 2) / INTERNAL_PAWN
                            : -((-scaled + INTERNAL_PAWN / 2) / INTERNAL_PAWN);
@@ -951,7 +956,7 @@ namespace
         const Move counter = prevMove == Move() ? Move() : counterMoveEntry(us, prevMove);
 
         if (ply > 0 && (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos) || pos.isRepetition(ply)))
-            return drawScore(pos) + 1 - static_cast<int>(nodes & 2);
+            return drawScore(pos) + DRAW_JITTER - static_cast<int>(nodes & 2);
 
         const tt::Entry *tte = excluded == Move() ? tt::probe(key) : nullptr;
         const bool ttHit = tte != nullptr;
