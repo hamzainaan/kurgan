@@ -507,7 +507,8 @@ namespace
         Move counter{};
         int ply = 0;
         bool ttPending = false;
-        bool scored = false;
+        bool tacticalScored = false;
+        bool quietsScored = false;
 
         void init(const Position &pos, const MoveList &list, Move ttBest, Move counterMove,
                   int plyIndex, bool capturesOnly)
@@ -520,7 +521,8 @@ namespace
             index = 0;
             deferredCount = 0;
             deferredIndex = 0;
-            scored = false;
+            tacticalScored = false;
+            quietsScored = capturesOnly;
 
             ttMove = Move();
             ttPending = false;
@@ -539,9 +541,13 @@ namespace
             return movegen::isTactical(pos, m) ? captureHistoryEntry(pos, m) : quietHistoryScore(pos, m, ply);
         }
 
-        void score(const Position &pos)
+        void score(const Position &pos, bool tacticalPhase)
         {
-            scored = true;
+            if (tacticalPhase)
+                tacticalScored = true;
+            else
+                quietsScored = true;
+
             const MoveList &list = *source;
             for (int i = 0; i < list.size; ++i)
             {
@@ -550,7 +556,7 @@ namespace
                     continue;
 
                 const bool tactical = movegen::isTactical(pos, m);
-                if (qsearch && !tactical)
+                if (tactical != tacticalPhase)
                     continue;
 
                 const int h = tactical ? captureHistoryEntry(pos, m) : quietHistoryScore(pos, m, ply);
@@ -568,8 +574,8 @@ namespace
                 else
                     value = h;
 
-                const int64_t rank = static_cast<int64_t>(value) * 65536 + (65535 - count);
-                moves[count] = {value, m, static_cast<uint16_t>(count), h, rank};
+                const int64_t rank = static_cast<int64_t>(value) * 65536 + (65535 - i);
+                moves[count] = {value, m, static_cast<uint16_t>(i), h, rank};
                 ++count;
             }
         }
@@ -599,12 +605,23 @@ namespace
                 return ttMove;
             }
 
-            if (!scored)
-                score(pos);
+            if (!tacticalScored)
+                score(pos, true);
 
-            while (index < count)
+            while (true)
             {
-                selectBest();
+                if (index < count)
+                    selectBest();
+
+                if (!quietsScored && (index >= count || moves[index].score < CAPTURE_BAND))
+                {
+                    score(pos, false);
+                    continue;
+                }
+
+                if (index >= count)
+                    break;
+
                 const ScoredMove sm = moves[index++];
                 const Move m = sm.move;
                 lastSeeValid = false;
