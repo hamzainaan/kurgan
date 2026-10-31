@@ -1074,20 +1074,23 @@ namespace
                 continue;
 
             const bool quiet = !movegen::isTactical(pos, m);
-            const bool checks = givesCheck(pos, m);
             const int histScore = picker.lastHistory;
             ++moveCount;
 
-            if (ply > 0 && !shallowSearch && hasNonPawn && bestScore > -MATE_THRESHOLD)
+            const bool canPrune = ply > 0 && !shallowSearch && hasNonPawn && bestScore > -MATE_THRESHOLD;
+
+            if (canPrune && quiet && !inCheck && depth <= tuned::LMP_DEPTH &&
+                moveCount > (tuned::LMP_BASE + depth * depth) / (2 - improving))
+            {
+                ++stats::current().lmpPruned;
+                continue;
+            }
+
+            const bool checks = givesCheck(pos, m);
+
+            if (canPrune)
             {
                 const int lmrDepth = std::max(0, depth - 1 - lmrTable[std::min(depth, MAX_DEPTH - 1)][std::min(moveCount, 63)]);
-
-                if (quiet && !inCheck && depth <= tuned::LMP_DEPTH &&
-                    moveCount > (tuned::LMP_BASE + depth * depth) / (2 - improving))
-                {
-                    ++stats::current().lmpPruned;
-                    continue;
-                }
 
                 if (quiet && !checks)
                 {
