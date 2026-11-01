@@ -1465,16 +1465,19 @@ namespace
         const tt::Entry *tte = tt::probe(key);
         Move ttMove{};
         int ttEval = NO_EVAL;
+        int ttScore = 0;
+        int ttBound = BOUND_NONE;
         if (tte != nullptr)
         {
             ttMove = tte->move;
             ttEval = tte->eval;
-            const int s = tt::scoreFromTT(tte->score, ply);
-            const bool mate = s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD;
+            ttScore = tt::scoreFromTT(tte->score, ply);
+            ttBound = tte->bound();
+            const bool mate = ttScore >= MATE_THRESHOLD || ttScore <= -MATE_THRESHOLD;
             const bool pvNode = beta - alpha > 1;
-            if ((tte->bound() == BOUND_EXACT || (tte->bound() == BOUND_LOWER && s >= beta) || (tte->bound() == BOUND_UPPER && s <= alpha))
-                && (!pvNode || !mate || hasMateProof(pos, ply, s)))
-                return s;
+            if ((ttBound == BOUND_EXACT || (ttBound == BOUND_LOWER && ttScore >= beta) || (ttBound == BOUND_UPPER && ttScore <= alpha))
+                && (!pvNode || !mate || hasMateProof(pos, ply, ttScore)))
+                return ttScore;
         }
 
         int rawEval = NO_EVAL;
@@ -1485,15 +1488,18 @@ namespace
             rawEval = ttEval != NO_EVAL ? ttEval : evaluate::evaluate(pos);
             standPat = correctedEval(pos, rawEval);
             bestScore = standPat;
-            if (standPat >= beta)
+            if (ttBound != BOUND_NONE && ttScore > -MATE_THRESHOLD && ttScore < MATE_THRESHOLD
+                && (ttBound == BOUND_EXACT || (ttBound == BOUND_LOWER && ttScore > standPat) || (ttBound == BOUND_UPPER && ttScore < standPat)))
+                bestScore = ttScore;
+            if (bestScore >= beta)
             {
                 ++stats::current().standPatCutoffs;
                 if (tte == nullptr)
                     tt::store(key, Move(), standPat, 0, BOUND_LOWER, ply, rawEval);
-                return standPat;
+                return bestScore;
             }
-            if (standPat > alpha)
-                alpha = standPat;
+            if (bestScore > alpha)
+                alpha = bestScore;
         }
 
         MoveList list;
