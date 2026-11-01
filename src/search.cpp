@@ -1320,7 +1320,10 @@ namespace
             ttMove = tte->move;
             ttEval = tte->eval;
             const int s = tt::scoreFromTT(tte->score, ply);
-            if (tte->bound() == BOUND_EXACT || (tte->bound() == BOUND_LOWER && s >= beta) || (tte->bound() == BOUND_UPPER && s <= alpha))
+            const bool mate = s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD;
+            const bool pvNode = beta - alpha > 1;
+            if ((tte->bound() == BOUND_EXACT || (tte->bound() == BOUND_LOWER && s >= beta) || (tte->bound() == BOUND_UPPER && s <= alpha))
+                && (!pvNode || !mate || hasMateProof(pos, ply, s)))
                 return s;
         }
 
