@@ -456,10 +456,15 @@ namespace
         return counterMoves[(static_cast<size_t>(c) * SQUARE_NB + prev.from()) * SQUARE_NB + moveTarget(prev)];
     }
 
-    int16_t &pawnHistoryEntry(const Position &pos, Piece piece, Square to)
+    int16_t *pawnHistoryRow(const Position &pos)
     {
         const size_t row = static_cast<uint32_t>(pos.pawnKey) & (PAWN_HISTORY_NB - 1);
-        return pawnHistory[row * PIECE_TO_NB + pieceToIndex(piece, to)];
+        return pawnHistory + row * PIECE_TO_NB;
+    }
+
+    int16_t &pawnHistoryEntry(const Position &pos, Piece piece, Square to)
+    {
+        return pawnHistoryRow(pos)[pieceToIndex(piece, to)];
     }
 
     int16_t &pawnCorrEntry(const Position &pos)
@@ -509,17 +514,42 @@ namespace
         }
     }
 
+    struct QuietHistory
+    {
+        const int (*mainRows)[SQUARE_NB];
+        const int16_t *pawnRow;
+        const int16_t *contRow[CONT_PLIES];
+        int contWeight[CONT_PLIES];
+        int contCount = 0;
+
+        QuietHistory(const Position &pos, int ply)
+            : mainRows(history[pos.sideToMove]),
+              pawnRow(pawnHistoryRow(pos))
+        {
+            for (int i = 0; i < CONT_PLIES; ++i)
+                if (contRows[i][ply] != nullptr)
+                {
+                    contRow[contCount] = contRows[i][ply];
+                    contWeight[contCount++] = CONT_WEIGHT[i];
+                }
+        }
+
+        int score(const Position &pos, Move m) const
+        {
+            const Square to = moveTarget(m);
+            const int pieceTo = pieceToIndex(pos.board[m.from()], to);
+            int cont = 0;
+            for (int i = 0; i < contCount; ++i)
+                cont += contWeight[i] * contRow[i][pieceTo];
+
+            return mainRows[m.from()][to] + CONT_SCALE * (cont / CONT_WEIGHT_SUM) / 100 +
+                   PAWN_SCALE * pawnRow[pieceTo] / 100;
+        }
+    };
+
     int quietHistoryScore(const Position &pos, Move m, int ply)
     {
-        const Piece piece = pos.board[m.from()];
-        const Square to = moveTarget(m);
-        int cont = 0;
-        for (int i = 0; i < CONT_PLIES; ++i)
-            if (contRows[i][ply] != nullptr)
-                cont += CONT_WEIGHT[i] * contRows[i][ply][pieceToIndex(piece, to)];
-
-        return history[pos.sideToMove][m.from()][to] + CONT_SCALE * (cont / CONT_WEIGHT_SUM) / 100 +
-               PAWN_SCALE * pawnHistoryEntry(pos, piece, to) / 100;
+        return QuietHistory(pos, ply).score(pos, m);
     }
 
     struct ScoredMove
@@ -605,6 +635,7 @@ namespace
             else
                 quietsScored = true;
 
+            const QuietHistory quietHistory(pos, ply);
             const MoveList &list = *source;
             for (int i = 0; i < list.size; ++i)
             {
@@ -616,7 +647,7 @@ namespace
                 if (tactical != tacticalPhase)
                     continue;
 
-                const int h = tactical ? captureHistoryEntry(pos, m) : quietHistoryScore(pos, m, ply);
+                const int h = tactical ? captureHistoryEntry(pos, m) : quietHistory.score(pos, m);
                 int value;
                 if (m.isPromotion() && m.promoType() != QUEEN)
                     value = h;
