@@ -191,8 +191,11 @@ namespace
     thread_local Move excludedStack[MAX_PLY + 2];
     thread_local int doubleExtensions[MAX_PLY + 2];
     thread_local int rootDepth = 0;
-    thread_local Move partialBest;
-    thread_local Move partialPonder;
+    thread_local Move partialPv[MAX_PLY];
+    thread_local int partialPvLength = 0;
+    thread_local int partialScore = 0;
+    thread_local bool partialLowerBound = false;
+    thread_local int rootBestScore = 0;
     int lmrTable[MAX_DEPTH][64];
 
     // Helper threads skip depths in staggered patterns to diversify the search.
@@ -776,7 +779,8 @@ namespace
     }
 
     // Caller holds outputMutex; a whole MultiPV set must be emitted together.
-    void printInfoLocked(int depth, int score, uint64_t nodeCount, long long elapsedMs, const Move *pv, int pvLen, int mpv)
+    void printInfoLocked(int depth, int score, uint64_t nodeCount, long long elapsedMs, const Move *pv, int pvLen, int mpv,
+                         bool lowerBound = false)
     {
         std::cout << "info depth " << depth << " seldepth " << seldepth << " multipv " << mpv;
 
@@ -790,6 +794,9 @@ namespace
             std::cout << " score cp " << -KNOWN_WIN_CP;
         else
             std::cout << " score cp " << toCentipawns(score);
+
+        if (lowerBound)
+            std::cout << " lowerbound";
 
         std::cout << " nodes " << nodeCount;
         if (elapsedMs > 0)
@@ -1327,6 +1334,8 @@ namespace
                 if (score > alpha)
                 {
                     alpha = score;
+                    if (ply == 0)
+                        rootBestScore = score;
 
                     pvTable[ply][ply] = m;
                     for (int j = ply + 1; j < pvLength[ply + 1]; ++j)
@@ -1461,7 +1470,10 @@ namespace
             ttMove = tte->move;
             ttEval = tte->eval;
             const int s = tt::scoreFromTT(tte->score, ply);
-            if (tte->bound() == BOUND_EXACT || (tte->bound() == BOUND_LOWER && s >= beta) || (tte->bound() == BOUND_UPPER && s <= alpha))
+            const bool mate = s >= MATE_THRESHOLD || s <= -MATE_THRESHOLD;
+            const bool pvNode = beta - alpha > 1;
+            if ((tte->bound() == BOUND_EXACT || (tte->bound() == BOUND_LOWER && s >= beta) || (tte->bound() == BOUND_UPPER && s <= alpha))
+                && (!pvNode || !mate || hasMateProof(pos, ply, s)))
                 return s;
         }
 
@@ -1585,8 +1597,7 @@ namespace
             beta = std::min(INF, prevScore + delta);
         }
 
-        partialBest = Move();
-        partialPonder = Move();
+        partialPvLength = 0;
         const bool isMain = workerId == 0 && currentMultiPV == 1;
 
         while (true)
@@ -1595,8 +1606,10 @@ namespace
 
             if (pvLength[0] > 0)
             {
-                partialBest = pvTable[0][0];
-                partialPonder = pvLength[0] > 1 ? pvTable[0][1] : Move();
+                partialPvLength = pvLength[0];
+                std::copy(pvTable[0], pvTable[0] + pvLength[0], partialPv);
+                partialScore = rootBestScore;
+                partialLowerBound = rootBestScore >= beta;
             }
 
             if (stopFlag.load(std::memory_order_relaxed))
@@ -1679,6 +1692,32 @@ namespace
             pos.undo_move(pv[i]);
 
         return played;
+    }
+
+    void adoptPartialLine(Position &pos, int depth, std::chrono::steady_clock::time_point start)
+    {
+        Move previousBest;
+        {
+            std::lock_guard<std::mutex> lock(bestMutex);
+            previousBest = finalBestMove;
+        }
+
+        partialPvLength = extendPVFromTT(pos, partialPv, partialPvLength);
+
+        if (!silentOutput && partialPv[0] != previousBest)
+        {
+            const long long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          std::chrono::steady_clock::now() - start)
+                                          .count();
+            const uint64_t reported = searchedNodes.load(std::memory_order_relaxed)
+                                      + static_cast<uint64_t>(nodes & 2047);
+            std::lock_guard<std::mutex> lock(outputMutex);
+            printInfoLocked(depth, partialScore, reported, elapsed, partialPv, partialPvLength, 1, partialLowerBound);
+        }
+
+        std::lock_guard<std::mutex> lock(bestMutex);
+        finalBestMove = partialPv[0];
+        finalPonderMove = partialPvLength > 1 ? partialPv[1] : Move();
     }
 
     void waitForStop()
@@ -1779,12 +1818,8 @@ namespace
                 if (stopFlag.load(std::memory_order_relaxed))
                 {
                     stoppedIteration = true;
-                    if (isMain && mpv == 1 && partialBest != Move())
-                    {
-                        std::lock_guard<std::mutex> lock(bestMutex);
-                        finalBestMove = partialBest;
-                        finalPonderMove = partialPonder;
-                    }
+                    if (isMain && mpv == 1 && partialPvLength > 0)
+                        adoptPartialLine(pos, depth, start);
                     break;
                 }
 
