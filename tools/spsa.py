@@ -37,7 +37,7 @@ A_RATIO = 0.1
 def parseArgs():
     parser = argparse.ArgumentParser(description='Tune search parameters with SPSA through cutechess-cli.')
     parser.add_argument('--engine', default=os.path.join(ROOT, 'kurgan'), help='engine binary to tune')
-    parser.add_argument('--book', required=True, help='opening book in epd format')
+    parser.add_argument('--book', required=True, help='opening book in epd or pgn format')
     parser.add_argument('--state', default='spsa_state.json', help='state file used to save and resume the run')
     parser.add_argument('--pairs', type=int, default=4000, help='total game pairs')
     parser.add_argument('--workers', type=int, default=max(1, (os.cpu_count() or 2) // 2), help='concurrent game pairs')
@@ -49,6 +49,10 @@ def parseArgs():
     parser.add_argument('--cutechess', default='cutechess-cli', help='cutechess-cli executable')
     parser.add_argument('--apply', action='store_true', help='write the tuned values into src/tuned_params.h')
     return parser.parse_args()
+
+
+def bookFormat(path):
+    return 'pgn' if path.lower().endswith('.pgn') else 'epd'
 
 
 def readDefinitions():
@@ -129,7 +133,7 @@ class Tuner:
             '-engine', 'cmd=' + os.path.abspath(self.args.engine), 'name=plus', 'initstr=' + self.initString(plus),
             '-engine', 'cmd=' + os.path.abspath(self.args.engine), 'name=minus', 'initstr=' + self.initString(minus),
             '-each', 'proto=uci', 'tc=' + self.args.tc, 'option.Hash=%d' % self.args.hash, 'option.Threads=1',
-            '-openings', 'file=' + os.path.abspath(self.args.book), 'format=epd', 'order=random',
+            '-openings', 'file=' + os.path.abspath(self.args.book), 'format=' + bookFormat(self.args.book), 'order=random',
             '-repeat', '-games', '2', '-rounds', '1',
             '-draw', 'movenumber=40', 'movecount=8', 'score=10',
             '-resign', 'movecount=4', 'score=800',
