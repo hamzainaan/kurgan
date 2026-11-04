@@ -47,6 +47,8 @@ def parseArgs():
     parser.add_argument('--c-ratio', type=float, default=0.1, help='final perturbation as a share of the start value')
     parser.add_argument('--r-end', type=float, default=0.005, help='final learning rate')
     parser.add_argument('--cutechess', default='cutechess-cli', help='cutechess-cli executable')
+    parser.add_argument('--runner', choices=('cutechess', 'fastchess'), default='cutechess', help='match runner that plays the games')
+    parser.add_argument('--fastchess', default='fastchess', help='fastchess executable')
     parser.add_argument('--apply', action='store_true', help='write the tuned values into src/tuned_params.h')
     return parser.parse_args()
 
@@ -128,6 +130,37 @@ class Tuner:
         return '\\n'.join('setoption name %s value %d' % (name, value) for name, value in values.items())
 
     def playPair(self, plus, minus):
+        if self.args.runner == 'fastchess':
+            return self.playFastchessPair(plus, minus)
+        return self.playCutechessPair(plus, minus)
+
+    def playFastchessPair(self, plus, minus):
+        command = [
+            self.args.fastchess,
+            '-engine', 'cmd=' + os.path.abspath(self.args.engine), 'name=plus',
+            *('option.%s=%d' % (name, value) for name, value in plus.items()),
+            '-engine', 'cmd=' + os.path.abspath(self.args.engine), 'name=minus',
+            *('option.%s=%d' % (name, value) for name, value in minus.items()),
+            '-each', 'proto=uci', 'tc=' + self.args.tc, 'option.Hash=%d' % self.args.hash, 'option.Threads=1',
+            '-openings', 'file=' + os.path.abspath(self.args.book), 'format=' + bookFormat(self.args.book), 'order=random',
+            '-srand', str(random.randrange(1, 2 ** 31)),
+            '-repeat', '-games', '2', '-rounds', '1',
+            '-draw', 'movenumber=40', 'movecount=8', 'score=10',
+            '-resign', 'movecount=4', 'score=800',
+            '-recover',
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            output = subprocess.run(command, capture_output=True, text=True, cwd=directory).stdout
+        headers = re.findall(r'^Results of (\S+) vs (\S+) ', output, re.MULTILINE)
+        scores = re.findall(r'^Games: (\d+), Wins: (\d+), Losses: (\d+), Draws: (\d+)', output, re.MULTILINE)
+        if not headers or not scores:
+            return None
+        games, wins, losses, draws = map(int, scores[-1])
+        if headers[-1] == ('minus', 'plus'):
+            wins, losses = losses, wins
+        return (wins, losses, draws) if games == 2 and wins + losses + draws == 2 else None
+
+    def playCutechessPair(self, plus, minus):
         command = [
             self.args.cutechess,
             '-engine', 'cmd=' + os.path.abspath(self.args.engine), 'name=plus', 'initstr=' + self.initString(plus),
