@@ -3,6 +3,8 @@ import json
 import os
 import random
 import re
+import shlex
+import stat
 import subprocess
 import sys
 import tempfile
@@ -134,22 +136,22 @@ class Tuner:
             return self.playFastchessPair(plus, minus)
         return self.playCutechessPair(plus, minus)
 
+    def writeLauncher(self, directory, side, values):
+        lines = ' '.join(shlex.quote('setoption name %s value %d' % (name, value)) for name, value in values.items())
+        path = os.path.join(directory, side + '.sh')
+        with open(path, 'w') as handle:
+            handle.write('#!/bin/sh\n{ printf \'%%s\\n\' %s; exec cat; } | exec %s\n'
+                         % (lines, shlex.quote(os.path.abspath(self.args.engine))))
+        os.chmod(path, stat.S_IRWXU)
+        return path
+
     def playFastchessPair(self, plus, minus):
-        command = [
-            self.args.fastchess,
-            '-engine', 'cmd=' + os.path.abspath(self.args.engine), 'name=plus',
-            *('option.%s=%d' % (name, value) for name, value in plus.items()),
-            '-engine', 'cmd=' + os.path.abspath(self.args.engine), 'name=minus',
-            *('option.%s=%d' % (name, value) for name, value in minus.items()),
-            '-each', 'proto=uci', 'tc=' + self.args.tc, 'option.Hash=%d' % self.args.hash, 'option.Threads=1',
-            '-openings', 'file=' + os.path.abspath(self.args.book), 'format=' + bookFormat(self.args.book), 'order=random',
-            '-srand', str(random.randrange(1, 2 ** 31)),
-            '-repeat', '-games', '2', '-rounds', '1',
-            '-draw', 'movenumber=40', 'movecount=8', 'score=10',
-            '-resign', 'movecount=4', 'score=800',
-            '-recover',
-        ]
         with tempfile.TemporaryDirectory() as directory:
+            command = [
+                self.args.fastchess,
+                '-engine', 'cmd=' + self.writeLauncher(directory, 'plus', plus), 'name=plus',
+                '-engine', 'cmd=' + self.writeLauncher(directory, 'minus', minus), 'name=minus',
+            ] + self.fastchessOptions()
             output = subprocess.run(command, capture_output=True, text=True, cwd=directory).stdout
         headers = re.findall(r'^Results of (\S+) vs (\S+) ', output, re.MULTILINE)
         scores = re.findall(r'^Games: (\d+), Wins: (\d+), Losses: (\d+), Draws: (\d+)', output, re.MULTILINE)
@@ -159,6 +161,17 @@ class Tuner:
         if headers[-1] == ('minus', 'plus'):
             wins, losses = losses, wins
         return (wins, losses, draws) if games == 2 and wins + losses + draws == 2 else None
+
+    def fastchessOptions(self):
+        return [
+            '-each', 'proto=uci', 'tc=' + self.args.tc, 'option.Hash=%d' % self.args.hash, 'option.Threads=1',
+            '-openings', 'file=' + os.path.abspath(self.args.book), 'format=' + bookFormat(self.args.book), 'order=random',
+            '-srand', str(random.randrange(1, 2 ** 31)),
+            '-repeat', '-games', '2', '-rounds', '1',
+            '-draw', 'movenumber=40', 'movecount=8', 'score=10',
+            '-resign', 'movecount=4', 'score=800',
+            '-recover',
+        ]
 
     def playCutechessPair(self, plus, minus):
         command = [
