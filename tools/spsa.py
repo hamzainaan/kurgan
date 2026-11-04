@@ -3,7 +3,6 @@ import json
 import os
 import random
 import re
-import shlex
 import stat
 import subprocess
 import sys
@@ -34,6 +33,30 @@ PRUNING_PARAMS = [
 ALPHA = 0.602
 GAMMA = 0.101
 A_RATIO = 0.1
+
+LAUNCHER = '''#!%s -I
+import os
+import subprocess
+import sys
+import threading
+
+engine = subprocess.Popen([%r], stdin=subprocess.PIPE)
+engine.stdin.write(%r)
+engine.stdin.flush()
+
+
+def forward():
+    try:
+        for line in sys.stdin.buffer:
+            engine.stdin.write(line)
+            engine.stdin.flush()
+    except (BrokenPipeError, ValueError):
+        pass
+
+
+threading.Thread(target=forward, daemon=True).start()
+os._exit(engine.wait())
+'''
 
 
 def parseArgs():
@@ -137,11 +160,10 @@ class Tuner:
         return self.playCutechessPair(plus, minus)
 
     def writeLauncher(self, directory, side, values):
-        lines = ' '.join(shlex.quote('setoption name %s value %d' % (name, value)) for name, value in values.items())
-        path = os.path.join(directory, side + '.sh')
+        prelude = ''.join('setoption name %s value %d\n' % (name, value) for name, value in values.items())
+        path = os.path.join(directory, side + '.py')
         with open(path, 'w') as handle:
-            handle.write('#!/bin/sh\n{ printf \'%%s\\n\' %s; exec cat; } | exec %s\n'
-                         % (lines, shlex.quote(os.path.abspath(self.args.engine))))
+            handle.write(LAUNCHER % (sys.executable, os.path.abspath(self.args.engine), prelude.encode()))
         os.chmod(path, stat.S_IRWXU)
         return path
 
