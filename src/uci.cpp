@@ -25,16 +25,6 @@
 
 namespace
 {
-    // Opponent data received through UCI_Opponent
-    struct Opponent
-    {
-        std::string title = "none";
-        int elo = 0;
-        bool computer = true;
-        std::string name;
-    };
-
-    Opponent opponent;
     bool debugMode = false;
 
     std::string asciiLower(std::string text)
@@ -80,54 +70,6 @@ namespace
             if (token == keyword)
                 return true;
         return false;
-    }
-
-    // Stores the opponent and ignores malformed values
-    void setOpponent(const std::string &value)
-    {
-        if (value.empty() || value == "<empty>")
-        {
-            opponent = Opponent{};
-            return;
-        }
-
-        std::istringstream in(value);
-        std::string title;
-        std::string elo;
-        std::string kind;
-        if (!(in >> title >> elo >> kind))
-            return;
-
-        if (title != "GM" && title != "IM" && title != "FM" && title != "WGM" && title != "WIM" && title != "none")
-            return;
-
-        int rating = 0;
-        if (elo != "none")
-        {
-            try
-            {
-                rating = std::stoi(elo);
-            }
-            catch (const std::exception &)
-            {
-                return;
-            }
-            if (rating < 0)
-                return;
-        }
-
-        if (kind != "computer" && kind != "human")
-            return;
-
-        std::string name;
-        std::getline(in, name);
-        if (!name.empty() && name.front() == ' ')
-            name.erase(0, 1);
-
-        opponent.title = title;
-        opponent.elo = rating;
-        opponent.computer = kind == "computer";
-        opponent.name = name;
     }
 
     // Matches a UCI move string against the pseudo-legal move list.
@@ -464,7 +406,7 @@ namespace
             else if (key == "uci_showrefutations")
                 search::setShowRefutations(checkValue(value));
             else if (key == "uci_opponent")
-                setOpponent(value);
+                return; // The engine does not use opponent data
             else if (key == "move overhead")
                 search::setMoveOverhead(std::stoi(value));
             else if (key == "clear hash")
