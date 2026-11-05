@@ -409,9 +409,4 @@ namespace manager
     {
         return Clock::time_point{Clock::duration{deadlineRep.load(std::memory_order_relaxed)}};
     }
-
-    void postpone()
-    {
-        setDeadline(Clock::now() + std::chrono::hours(24));
-    }
 }

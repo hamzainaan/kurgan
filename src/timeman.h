@@ -33,5 +33,4 @@ namespace manager
 
     // Hard deadline the search threads poll
     std::chrono::steady_clock::time_point deadline();
-    void postpone(); // Moves the deadline a day ahead
 }
