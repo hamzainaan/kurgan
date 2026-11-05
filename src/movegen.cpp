@@ -270,7 +270,28 @@ namespace
         return betweenTable[a][b];
     }
 
-    void putPiece(Position &pos, Piece p, Square sq)
+    bool kingSafeAfter(const Position &pos, Move move, Square ksq)
+    {
+        const Color us = pos.sideToMove;
+        const Color them = static_cast<Color>(us ^ 1);
+        const Bitboard toBit = 1ULL << move.to();
+        Bitboard occ = ((pos.byColor[WHITE] | pos.byColor[BLACK]) ^ (1ULL << move.from())) | toBit;
+        Bitboard theirs = pos.byColor[them] & ~toBit;
+        if (move.isEnPassant())
+        {
+            const Bitboard capturedBit = 1ULL << (move.to() + (us == WHITE ? -8 : 8));
+            occ &= ~capturedBit;
+            theirs &= ~capturedBit;
+        }
+
+        return !((pawnAttacks[us][ksq] & theirs & pos.byType[PAWN])
+                 | (knightAttacks[ksq] & theirs & pos.byType[KNIGHT])
+                 | (kingAttacks[ksq] & theirs & pos.byType[KING])
+                 | (bishopAttack(ksq, occ) & theirs & (pos.byType[BISHOP] | pos.byType[QUEEN]))
+                 | (rookAttack(ksq, occ) & theirs & (pos.byType[ROOK] | pos.byType[QUEEN])));
+    }
+
+    [[maybe_unused]] void putPiece(Position &pos, Piece p, Square sq)
     {
         const Bitboard bit = 1ULL << sq;
         pos.board[sq] = p;
@@ -279,7 +300,7 @@ namespace
         pos.byType[typeOf(p)] |= bit;
     }
 
-    void removePiece(Position &pos, Square sq)
+    [[maybe_unused]] void removePiece(Position &pos, Square sq)
     {
         const Piece p = pos.board[sq];
         if (p == NO_PIECE)
@@ -291,7 +312,7 @@ namespace
         pos.byType[typeOf(p)] &= notBit;
     }
 
-    void makeMove(Position &pos, Move m)
+    [[maybe_unused]] void makeMove(Position &pos, Move m)
     {
         const Color us = pos.sideToMove;
         const Color them = static_cast<Color>(us ^ 1);
@@ -550,10 +571,8 @@ bool movegen::is_legal(const Position &pos, Move move)
         return !squareAttackedWith(pos, to, them, occ);
     }
 
-    Position copy = pos;
-    makeMove(copy, move);
-    const Square ksq = lsb(copy.byColor[us] & copy.byType[KING]);
-    return !squareAttacked(copy, ksq, them);
+    const Square ksq = pos.kingSquare(us);
+    return ksq != SQ_NONE && kingSafeAfter(pos, move, ksq);
 }
 
 void movegen::setChess960(bool enabled)
