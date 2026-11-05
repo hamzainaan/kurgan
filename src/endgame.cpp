@@ -12,12 +12,14 @@
 
 namespace
 {
+    // Material values in internal evaluation units
     constexpr int PAWN_VALUE = 176;
     constexpr int KNIGHT_VALUE = 720;
     constexpr int BISHOP_VALUE = 770;
     constexpr int ROOK_VALUE = 1170;
     constexpr int QUEEN_VALUE = 2270;
     constexpr int MATERIAL_CAP = 8000;
+    // Marks a scaling rule that does not apply
     constexpr int SCALE_NONE = -1;
     constexpr int SCALE_MAX = 2 * endgame::SCALE_NORMAL;
     constexpr int MAX_SCALED_PIECES = 4;
@@ -25,6 +27,7 @@ namespace
     constexpr Bitboard FILE_A_BB = 0x0101010101010101ULL;
     constexpr Bitboard FILE_H_BB = FILE_A_BB << 7;
 
+    // Piece counts and non pawn material per color
     struct Material
     {
         int count[COLOR_NB][PIECE_TYPE_NB] = {};
@@ -46,12 +49,14 @@ namespace
         return m;
     }
 
+    // Checks for an exact material signature
     bool has(const Material &m, Color c, int pawns, int knights, int bishops, int rooks, int queens)
     {
         return m.count[c][PAWN] == pawns && m.count[c][KNIGHT] == knights && m.count[c][BISHOP] == bishops
                && m.count[c][ROOK] == rooks && m.count[c][QUEEN] == queens;
     }
 
+    // True when the side has only its king
     bool bare(const Material &m, Color c)
     {
         return m.pieces[c] == 0 && m.count[c][PAWN] == 0;
@@ -127,6 +132,7 @@ namespace
         return (piecesOf(pos, static_cast<Color>(c ^ 1), PAWN) & passedSpan(c, s)) == 0;
     }
 
+    // Mirrors a square so the strong side is white with its pawn on files A to D
     Square normalize(const Position &pos, Color strong, Square s)
     {
         if (fileOf(pieceSquare(pos, strong, PAWN)) >= FILE_E)
@@ -134,11 +140,13 @@ namespace
         return strong == WHITE ? s : flipRank(s);
     }
 
+    // Converts a strong side score to the side to move
     int fromStrong(const Position &pos, Color strong, int value)
     {
         return pos.sideToMove == strong ? value : -value;
     }
 
+    // The bitbase covers the side to move and both kings and a pawn on files A to D
     constexpr unsigned KPK_SIZE = 2 * 24 * 64 * 64;
     constexpr uint8_t KPK_INVALID = 0;
     constexpr uint8_t KPK_UNKNOWN = 1;
@@ -163,6 +171,7 @@ namespace
         uint8_t result = KPK_INVALID;
     };
 
+    // Classifies the positions that are decided without looking ahead
     KpkEntry kpkEntry(unsigned index)
     {
         KpkEntry e;
@@ -190,6 +199,7 @@ namespace
         return e;
     }
 
+    // Resolves an entry from the results of its successors
     uint8_t kpkClassify(const std::vector<KpkEntry> &db, KpkEntry &e)
     {
         const uint8_t good = e.stm == WHITE ? KPK_WIN : KPK_DRAW;
@@ -218,6 +228,7 @@ namespace
         return e.result;
     }
 
+    // Repeats the retrograde pass until no entry changes
     void buildKPK()
     {
         std::vector<KpkEntry> db(KPK_SIZE);
@@ -249,6 +260,7 @@ namespace
         return false;
     }
 
+    // Drives the lone king to the edge and adds a win bonus with mating material
     int evalKXK(const Position &pos, const Material &m, Color strong)
     {
         const Color weak = static_cast<Color>(strong ^ 1);
@@ -270,6 +282,7 @@ namespace
         return fromStrong(pos, strong, result);
     }
 
+    // Drives the lone king toward a corner of the bishop color
     int evalKBNK(const Position &pos, Color strong)
     {
         const Color weak = static_cast<Color>(strong ^ 1);
@@ -281,6 +294,7 @@ namespace
         return fromStrong(pos, strong, result);
     }
 
+    // Scores bitbase wins and treats every other position as a draw
     int evalKPK(const Position &pos, Color strong)
     {
         const Color weak = static_cast<Color>(strong ^ 1);
@@ -369,6 +383,7 @@ namespace
         return fromStrong(pos, strong, result);
     }
 
+    // Dispatches to a known endgame evaluator for the given strong side
     bool evaluateFor(const Position &pos, const Material &m, Color strong, int &value)
     {
         const Color weak = static_cast<Color>(strong ^ 1);
@@ -431,6 +446,7 @@ namespace
         return false;
     }
 
+    // Scaling rules return a factor for drawish material or SCALE_NONE when they do not apply
     int scaleKBPsK(const Position &pos, Color strong)
     {
         const Color weak = static_cast<Color>(strong ^ 1);
@@ -722,6 +738,7 @@ namespace
         return endgame::probeKPK(strongKing, strongPawn, weakKing, us) ? SCALE_NONE : 0;
     }
 
+    // Picks the scaling rule that matches the material
     int scaleFor(const Position &pos, const Material &m, Color strong)
     {
         const Color weak = static_cast<Color>(strong ^ 1);
