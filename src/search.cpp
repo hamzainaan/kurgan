@@ -689,7 +689,7 @@ namespace
                 {
                     const Move m = list.moves[i];
                     if (m != ttMove && m != excluded && !movegen::isTactical(pos, m)
-                        && movegen::is_legal(pos, m, legality))
+                        && movegen::isLegal(pos, m, legality))
                         ++dropped;
                 }
             }
@@ -699,7 +699,7 @@ namespace
             {
                 if (movegen::isTactical(pos, moves[j].move))
                     moves[kept++] = moves[j];
-                else if (moves[j].move != excluded && movegen::is_legal(pos, moves[j].move, legality))
+                else if (moves[j].move != excluded && movegen::isLegal(pos, moves[j].move, legality))
                     ++dropped;
             }
             count = kept;
@@ -862,7 +862,7 @@ namespace
         MoveList list;
         movegen::generateEvasions(pos, legality, list);
         for (int i = 0; i < list.count(); ++i)
-            if (movegen::is_legal(pos, list[i], legality))
+            if (movegen::isLegal(pos, list[i], legality))
                 return false;
 
         return true;
@@ -872,7 +872,7 @@ namespace
     Move firstLegalMove(const Position &pos)
     {
         MoveList list;
-        movegen::generate_pseudo_legal_moves(pos, list);
+        movegen::generatePseudoLegalMoves(pos, list);
         for (int i = 0; i < list.size; ++i)
         {
             Position next = pos;
@@ -918,12 +918,12 @@ namespace
         if (n == need - 1)
         {
             MoveList list;
-            movegen::generate_pseudo_legal_moves(pos, list);
+            movegen::generatePseudoLegalMoves(pos, list);
             movegen::Legality legality = movegen::legality(pos);
             for (int i = 0; i < list.count(); ++i)
             {
                 const Move m = list[i];
-                if (!movegen::is_legal(pos, m, legality))
+                if (!movegen::isLegal(pos, m, legality))
                     continue;
                 pos.doMove(m, true);
 
@@ -1134,12 +1134,12 @@ namespace
             ++stats::current().probcutEligible;
 
             MoveList probcutList;
-            movegen::generate_tactical_moves(pos, probcutList);
+            movegen::generateTacticalMoves(pos, probcutList);
 
             for (int i = 0; i < probcutList.size; ++i)
             {
                 const Move m = probcutList.moves[i];
-                if (!see::ge(pos, m, probcutBeta - staticEval) || !movegen::is_legal(pos, m, legality))
+                if (!see::ge(pos, m, probcutBeta - staticEval) || !movegen::isLegal(pos, m, legality))
                     continue;
                 pos.doMove(m, true);
 
@@ -1171,7 +1171,7 @@ namespace
         if (inCheck)
             movegen::generateEvasions(pos, legality, list);
         else
-            movegen::generate_pseudo_legal_moves(pos, list);
+            movegen::generatePseudoLegalMoves(pos, list);
 
         MovePicker picker;
         picker.init(pos, list, ttMove, counter, ply, false);
@@ -1193,7 +1193,7 @@ namespace
         {
             if (m == excluded || (ply == 0 && (!inSearchMoves(m) || isExcludedRootMove(m))))
                 continue;
-            if (!movegen::is_legal(pos, m, legality))
+            if (!movegen::isLegal(pos, m, legality))
                 continue;
 
             const bool quiet = !movegen::isTactical(pos, m);
@@ -1539,7 +1539,7 @@ namespace
         if (inCheck)
             movegen::generateEvasions(pos, legality, list);
         else
-            movegen::generate_tactical_moves(pos, list);
+            movegen::generateTacticalMoves(pos, list);
 
         setContinuationRows(pos, ply);
 
@@ -1579,7 +1579,7 @@ namespace
             else if (bestScore > -MATE_THRESHOLD && !movegen::isTactical(pos, m))
                 continue;
 
-            if (!movegen::is_legal(pos, m, legality))
+            if (!movegen::isLegal(pos, m, legality))
                 continue;
             pos.doMove(m, true);
 

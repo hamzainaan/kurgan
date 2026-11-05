@@ -548,7 +548,7 @@ bool movegen::squareAttacked(const Position &pos, Square sq, Color by)
     return squareAttackedWith(pos, sq, by, pos.byColor[WHITE] | pos.byColor[BLACK]);
 }
 
-void movegen::generate_pseudo_legal_moves(const Position &pos, MoveList &list)
+void movegen::generatePseudoLegalMoves(const Position &pos, MoveList &list)
 {
     list.clear();
 
@@ -582,7 +582,7 @@ void movegen::generateEvasions(const Position &pos, const Legality &info, MoveLi
     generateKingMoves(pos, list);
 }
 
-void movegen::generate_tactical_moves(const Position &pos, MoveList &list)
+void movegen::generateTacticalMoves(const Position &pos, MoveList &list)
 {
     list.clear();
 
@@ -597,7 +597,7 @@ void movegen::generate_tactical_moves(const Position &pos, MoveList &list)
     generateKingMoves(pos, list, true);
 }
 
-bool movegen::is_legal(const Position &pos, Move move)
+bool movegen::isLegal(const Position &pos, Move move)
 {
     const Color us = pos.sideToMove;
     const Color them = static_cast<Color>(us ^ 1);
@@ -642,7 +642,7 @@ movegen::Legality movegen::legality(const Position &pos)
     return info;
 }
 
-bool movegen::is_legal(const Position &pos, Move move, Legality &info)
+bool movegen::isLegal(const Position &pos, Move move, Legality &info)
 {
     if ((info.safe & (1ULL << move.from())) && !move.isEnPassant())
         return true;

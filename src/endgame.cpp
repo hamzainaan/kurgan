@@ -242,9 +242,9 @@ namespace
     bool hasLegalMove(const Position &pos)
     {
         MoveList list;
-        movegen::generate_pseudo_legal_moves(pos, list);
+        movegen::generatePseudoLegalMoves(pos, list);
         for (int i = 0; i < list.size; ++i)
-            if (movegen::is_legal(pos, list.moves[i]))
+            if (movegen::isLegal(pos, list.moves[i]))
                 return true;
         return false;
     }

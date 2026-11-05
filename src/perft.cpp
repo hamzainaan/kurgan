@@ -84,13 +84,13 @@ uint64_t perft::nodes(Position &pos, int depth)
     if (legality.checkers)
         movegen::generateEvasions(pos, legality, list);
     else
-        movegen::generate_pseudo_legal_moves(pos, list);
+        movegen::generatePseudoLegalMoves(pos, list);
 
     uint64_t n = 0;
     for (int i = 0; i < list.size; ++i)
     {
         const Move m = list.moves[i];
-        if (!movegen::is_legal(pos, m, legality))
+        if (!movegen::isLegal(pos, m, legality))
             continue;
         pos.doMove(m, true);
         n += nodes(pos, depth - 1);
@@ -109,13 +109,13 @@ void perft::divide(Position &pos, int depth)
     if (legality.checkers)
         movegen::generateEvasions(pos, legality, list);
     else
-        movegen::generate_pseudo_legal_moves(pos, list);
+        movegen::generatePseudoLegalMoves(pos, list);
 
     uint64_t total = 0;
     for (int i = 0; i < list.size; ++i)
     {
         const Move m = list.moves[i];
-        if (!movegen::is_legal(pos, m, legality))
+        if (!movegen::isLegal(pos, m, legality))
             continue;
         pos.doMove(m, true);
 

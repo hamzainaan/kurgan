@@ -141,11 +141,11 @@ namespace manager
     int winningCaptures(const Position &pos, bool legalOnly)
     {
         MoveList list;
-        movegen::generate_tactical_moves(pos, list);
+        movegen::generateTacticalMoves(pos, list);
 
         int count = 0;
         for (int i = 0; i < list.count(); ++i)
-            if ((!legalOnly || movegen::is_legal(pos, list[i])) && see::ge(pos, list[i], 1))
+            if ((!legalOnly || movegen::isLegal(pos, list[i])) && see::ge(pos, list[i], 1))
                 ++count;
         return count;
     }
@@ -157,10 +157,10 @@ namespace manager
         const bool inCheck = ksq != SQ_NONE && movegen::squareAttacked(root, ksq, static_cast<Color>(us ^ 1));
 
         MoveList list;
-        movegen::generate_pseudo_legal_moves(root, list);
+        movegen::generatePseudoLegalMoves(root, list);
         int legal = 0;
         for (int i = 0; i < list.count(); ++i)
-            if (movegen::is_legal(root, list[i]))
+            if (movegen::isLegal(root, list[i]))
                 ++legal;
         if (searchMoveCount > 0)
             legal = std::min(legal, searchMoveCount);

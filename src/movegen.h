@@ -115,13 +115,13 @@ namespace movegen
         return type == NORMAL ? pos.board[m.to()] != NO_PIECE : type != CASTLING;
     }
 
-    void generate_pseudo_legal_moves(const Position &pos, MoveList &list);
+    void generatePseudoLegalMoves(const Position &pos, MoveList &list);
 
     // Generates the tactical subset in the same relative order as the full generator.
-    void generate_tactical_moves(const Position &pos, MoveList &list);
+    void generateTacticalMoves(const Position &pos, MoveList &list);
 
     // Checks whether a pseudo-legal move leaves the king out of check.
-    bool is_legal(const Position &pos, Move move);
+    bool isLegal(const Position &pos, Move move);
 
     struct Legality
     {
@@ -134,7 +134,7 @@ namespace movegen
 
     Legality legality(const Position &pos);
 
-    bool is_legal(const Position &pos, Move move, Legality &info);
+    bool isLegal(const Position &pos, Move move, Legality &info);
 
     void generateEvasions(const Position &pos, const Legality &info, MoveList &list);
 

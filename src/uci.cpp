@@ -166,14 +166,14 @@ namespace
         }
 
         MoveList list;
-        movegen::generate_pseudo_legal_moves(pos, list);
+        movegen::generatePseudoLegalMoves(pos, list);
         for (int i = 0; i < list.size; ++i)
         {
             const Move m = list.moves[i];
             if (m.from() != from)
                 continue;
 
-            if (!movegen::is_legal(pos, m))
+            if (!movegen::isLegal(pos, m))
                 continue;
 
             if (m.isCastling())
