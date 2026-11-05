@@ -675,6 +675,48 @@ bool movegen::is_legal(const Position &pos, Move move, Legality &info)
     return !(info.pinned & (1ULL << from)) || kingSafeAfter(pos, move, info.king);
 }
 
+bool movegen::isPseudoLegal(const Position &pos, Move move)
+{
+    const Color us = pos.sideToMove;
+    const Color them = static_cast<Color>(us ^ 1);
+    const Square from = move.from();
+    const Square to = move.to();
+    const Piece piece = pos.board[from];
+    if (piece == NO_PIECE || colorOf(piece) != us)
+        return false;
+
+    if (!move.isPromotion() && (move.data & 0x3000))
+        return false;
+    if (move.isCastling())
+        return canCastle(pos, move);
+
+    const Bitboard toBit = 1ULL << to;
+    const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
+    if (pos.byColor[us] & toBit)
+        return false;
+
+    const PieceType pt = typeOf(piece);
+    if (pt != PAWN)
+        return move.type() == NORMAL && (pieceAttacks(pt, from, occ) & toBit) != 0;
+
+    if (move.isEnPassant())
+        return to == pos.enPassantSquare && (pawnAttacks[us][from] & toBit) != 0;
+
+    const Bitboard promoRank = us == WHITE ? RANK_8_BB : RANK_1_BB;
+    if (((toBit & promoRank) != 0) != move.isPromotion())
+        return false;
+
+    if (pawnAttacks[us][from] & toBit)
+        return (pos.byColor[them] & toBit) != 0;
+
+    const int up = us == WHITE ? 8 : -8;
+    if (to == from + up)
+        return !(occ & toBit);
+
+    const Bitboard startRank = us == WHITE ? RANK_2_BB : RANK_7_BB;
+    return to == from + 2 * up && (startRank & (1ULL << from)) && !(occ & (toBit | (1ULL << (from + up))));
+}
+
 void movegen::setChess960(bool enabled)
 {
     chess960Mode = enabled;

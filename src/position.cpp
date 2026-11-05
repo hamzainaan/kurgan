@@ -208,6 +208,9 @@ bool Position::do_move(Move move, bool knownLegal)
 {
     initZobrist();
 
+    if (!knownLegal && !movegen::isPseudoLegal(*this, move))
+        return false;
+
     const Color us = sideToMove;
     const Color them = static_cast<Color>(us ^ 1);
     const Square from = move.from();

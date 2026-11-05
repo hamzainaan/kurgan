@@ -137,4 +137,6 @@ namespace movegen
     bool is_legal(const Position &pos, Move move, Legality &info);
 
     void generateEvasions(const Position &pos, const Legality &info, MoveList &list);
+
+    bool isPseudoLegal(const Position &pos, Move move);
 }
