@@ -4,6 +4,7 @@
 #include "nnue.h"
 #include "position.h"
 #include "search.h"
+#include "stats.h"
 #include "tt.h"
 
 #include <algorithm>
@@ -108,6 +109,7 @@ namespace
         search::prepare(pos, limits);
         search::go(pos, limits);
         score = search::bestScore();
+        stats::clearRecords();
         return search::bestMove();
     }
 
