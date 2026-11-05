@@ -90,6 +90,11 @@ namespace
     {
         return 0xFFULL << (8 * static_cast<int>(c == WHITE ? RANK_1 : RANK_8));
     }
+
+    std::string squareName(Square s)
+    {
+        return {static_cast<char>('a' + fileOf(s)), static_cast<char>('1' + rankOf(s))};
+    }
 }
 
 Position::Position()
@@ -668,8 +673,7 @@ std::string Position::fen() const
     else
     {
         fen += ' ';
-        fen += static_cast<char>('a' + (enPassantSquare % 8));
-        fen += static_cast<char>('1' + (enPassantSquare / 8));
+        fen += squareName(enPassantSquare);
         fen += ' ';
     }
 
@@ -702,9 +706,7 @@ void Position::printBoard() const
     if (enPassantSquare == SQ_NONE)
         std::cout << "En passant: -\n";
     else
-        std::cout << "En passant: "
-                  << static_cast<char>('a' + (enPassantSquare % 8))
-                  << static_cast<char>('1' + (enPassantSquare / 8)) << '\n';
+        std::cout << "En passant: " << squareName(enPassantSquare) << '\n';
 
     std::cout << "Halfmove clock: " << halfmoveClock << '\n';
     std::cout << "Fullmove number: " << fullmoveNumber << '\n';
