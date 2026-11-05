@@ -56,7 +56,6 @@ namespace nnue
 
     // Enables use of the loaded network.
     void setEnabled(bool value);
-    bool enabled();
 
     // Checks whether NNUE is supported, loaded and enabled.
     bool active();

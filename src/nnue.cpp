@@ -31,7 +31,6 @@ void nnue::unload() {}
 bool nnue::loaded() { return false; }
 const std::string &nnue::error() { return loadError; }
 void nnue::setEnabled(bool value) { netEnabled = value; }
-bool nnue::enabled() { return netEnabled; }
 bool nnue::active() { return false; }
 const std::string &nnue::file() { return netFile; }
 uint32_t nnue::hash() { return 0; }
@@ -461,8 +460,6 @@ void nnue::setEnabled(bool value)
     netEnabled = value;
     ++netGeneration;
 }
-
-bool nnue::enabled() { return netEnabled; }
 
 bool nnue::active() { return network != nullptr && netEnabled; }
 
