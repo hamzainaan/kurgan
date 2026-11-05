@@ -51,15 +51,21 @@ namespace tt
     int scoreFromTT(int score, int ply);
     int scoreToTT(int score, int ply);
 
+    // Allocates a table rounded down to a power of two clusters
     void resize(size_t megabytes);
+    // Invalidates every entry by changing the key salt and generation
     void clear();
     bool allocated();
+    // Ages the table for a new search
     void newSearch();
 
+    // Returns the matching entry or nullptr
     Entry *probe(uint64_t key);
 
+    // Prefetches the cluster of a key
     void prefetch(uint64_t key);
 
+    // Stores a result with depth and age based replacement
     void store(uint64_t key, Move move, int score, int depth, int bound, int ply, int eval = NO_EVAL, bool pv = false);
 
     // Returns approximate table usage in parts per thousand.
