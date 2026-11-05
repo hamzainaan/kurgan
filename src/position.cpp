@@ -442,22 +442,8 @@ bool Position::isRepetition(int ply) const
     return false;
 }
 
-bool Position::setFen(const std::string &fen)
+bool Position::parseBoard(const std::string &boardStr)
 {
-    std::istringstream ss(fen);
-    std::string boardStr, sideStr, castlingStr, epStr, halfmoveStr, fullmoveStr;
-    if (!(ss >> boardStr >> sideStr >> castlingStr >> epStr))
-        return false;
-
-    // The halfmove clock and fullmove number are optional in UCI.
-    if (!(ss >> halfmoveStr))
-        halfmoveStr = "0";
-    if (!(ss >> fullmoveStr))
-        fullmoveStr = "1";
-
-    initZobrist();
-    clear();
-
     int rank = RANK_8;
     int file = FILE_A;
     for (char c : boardStr)
@@ -484,79 +470,76 @@ bool Position::setFen(const std::string &fen)
         if (file > FILE_NB)
             return false;
     }
-    if (rank != RANK_1 || file != FILE_NB)
-        return false;
+    return rank == RANK_1 && file == FILE_NB;
+}
 
-    if (sideStr == "w")
-        sideToMove = WHITE;
-    else if (sideStr == "b")
-        sideToMove = BLACK;
-    else
-        return false;
+bool Position::parseCastling(const std::string &castlingStr)
+{
+    if (castlingStr == "-")
+        return true;
 
-    // Accept both classical and Chess960 castling letters. Classical rights
-    // name the side, while Shredder-FEN letters name the rook file.
-    if (castlingStr != "-")
+    for (char c : castlingStr)
     {
-        for (char c : castlingStr)
+        Color color;
+        Square rookSq;
+
+        switch (c)
         {
-            Color color;
-            Square rookSq;
-
-            switch (c)
-            {
-            case 'K':
-            case 'Q':
-            case 'k':
-            case 'q':
-            {
-                color = (c == 'K' || c == 'Q') ? WHITE : BLACK;
-                const bool queenSide = (c == 'Q' || c == 'q');
-                const Rank homeRank = color == WHITE ? RANK_1 : RANK_8;
-                const Bitboard rooks = byColor[color] & byType[ROOK] & backRankOf(color);
-                const Square ksq = kingSquare(color);
-
-                const Square outer = queenSide ? (rooks ? lsb(rooks) : SQ_NONE)
-                                               : (rooks ? msb(rooks) : SQ_NONE);
-                const bool usable = outer != SQ_NONE && (ksq == SQ_NONE || (queenSide ? outer < ksq : outer > ksq));
-                rookSq = usable ? outer : makeSquare(queenSide ? FILE_A : FILE_H, homeRank);
-                break;
-            }
-            case 'A':
-            case 'B':
-            case 'C':
-            case 'D':
-            case 'E':
-            case 'F':
-            case 'G':
-            case 'H':
-                color = WHITE;
-                rookSq = makeSquare(static_cast<File>(c - 'A'), RANK_1);
-                break;
-            case 'a':
-            case 'b':
-            case 'c':
-            case 'd':
-            case 'e':
-            case 'f':
-            case 'g':
-            case 'h':
-                color = BLACK;
-                rookSq = makeSquare(static_cast<File>(c - 'a'), RANK_8);
-                break;
-            default:
-                return false;
-            }
-
+        case 'K':
+        case 'Q':
+        case 'k':
+        case 'q':
+        {
+            color = (c == 'K' || c == 'Q') ? WHITE : BLACK;
+            const bool queenSide = (c == 'Q' || c == 'q');
+            const Rank homeRank = color == WHITE ? RANK_1 : RANK_8;
+            const Bitboard rooks = byColor[color] & byType[ROOK] & backRankOf(color);
             const Square ksq = kingSquare(color);
-            // A rook right of the king determines the side, not the letter itself.
-            const CastlingSide side = (ksq != SQ_NONE && rookSq < ksq) ? QUEEN_SIDE : KING_SIDE;
 
-            castlingRights |= castlingRight(color, side);
-            castlingRookSquare[color][side] = rookSq;
+            const Square outer = queenSide ? (rooks ? lsb(rooks) : SQ_NONE)
+                                           : (rooks ? msb(rooks) : SQ_NONE);
+            const bool usable = outer != SQ_NONE && (ksq == SQ_NONE || (queenSide ? outer < ksq : outer > ksq));
+            rookSq = usable ? outer : makeSquare(queenSide ? FILE_A : FILE_H, homeRank);
+            break;
         }
-    }
+        case 'A':
+        case 'B':
+        case 'C':
+        case 'D':
+        case 'E':
+        case 'F':
+        case 'G':
+        case 'H':
+            color = WHITE;
+            rookSq = makeSquare(static_cast<File>(c - 'A'), RANK_1);
+            break;
+        case 'a':
+        case 'b':
+        case 'c':
+        case 'd':
+        case 'e':
+        case 'f':
+        case 'g':
+        case 'h':
+            color = BLACK;
+            rookSq = makeSquare(static_cast<File>(c - 'a'), RANK_8);
+            break;
+        default:
+            return false;
+        }
 
+        const Square ksq = kingSquare(color);
+        // A rook right of the king determines the side, not the letter itself.
+        const CastlingSide side = (ksq != SQ_NONE && rookSq < ksq) ? QUEEN_SIDE : KING_SIDE;
+
+        castlingRights |= castlingRight(color, side);
+        castlingRookSquare[color][side] = rookSq;
+    }
+    return true;
+}
+
+bool Position::parseEnPassant(const std::string &epStr)
+{
     if (epStr == "-")
     {
         enPassantSquare = SQ_NONE;
@@ -581,7 +564,11 @@ bool Position::setFen(const std::string &fen)
         if (!capturable)
             enPassantSquare = SQ_NONE;
     }
+    return true;
+}
 
+bool Position::parseClocks(const std::string &halfmoveStr, const std::string &fullmoveStr)
+{
     try
     {
         halfmoveClock = std::stoi(halfmoveStr);
@@ -596,6 +583,42 @@ bool Position::setFen(const std::string &fen)
 
     halfmoveClock = std::min(halfmoveClock, 1000000);
     fullmoveNumber = std::min(fullmoveNumber, 1000000);
+    return true;
+}
+
+bool Position::setFen(const std::string &fen)
+{
+    std::istringstream ss(fen);
+    std::string boardStr, sideStr, castlingStr, epStr, halfmoveStr, fullmoveStr;
+    if (!(ss >> boardStr >> sideStr >> castlingStr >> epStr))
+        return false;
+
+    // The halfmove clock and fullmove number are optional in UCI.
+    if (!(ss >> halfmoveStr))
+        halfmoveStr = "0";
+    if (!(ss >> fullmoveStr))
+        fullmoveStr = "1";
+
+    initZobrist();
+    clear();
+
+    if (!parseBoard(boardStr))
+        return false;
+
+    if (sideStr == "w")
+        sideToMove = WHITE;
+    else if (sideStr == "b")
+        sideToMove = BLACK;
+    else
+        return false;
+
+    // Accept both classical and Chess960 castling letters. Classical rights
+    // name the side, while Shredder-FEN letters name the rook file.
+    if (!parseCastling(castlingStr))
+        return false;
+
+    if (!parseEnPassant(epStr) || !parseClocks(halfmoveStr, fullmoveStr))
+        return false;
 
     zobristKey ^= sideToMove == BLACK ? sideKey : 0;
     zobristKey ^= castlingKeys[castlingRights];

@@ -115,4 +115,9 @@ private:
     void clear();
     void putPiece(Piece piece, Square square);
     void removePiece(Square square);
+
+    bool parseBoard(const std::string &boardStr);
+    bool parseCastling(const std::string &castlingStr);
+    bool parseEnPassant(const std::string &epStr);
+    bool parseClocks(const std::string &halfmoveStr, const std::string &fullmoveStr);
 };
