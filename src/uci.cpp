@@ -452,7 +452,7 @@ namespace
             else if (key == "threads")
                 search::setThreads(std::stoi(value));
             else if (key == "ponder")
-                search::setPonder(checkValue(value));
+                return; // Pondering follows go ponder so the option keeps no state
             else if (key == "uci_chess960")
                 movegen::setChess960(checkValue(value));
             else if (key == "multipv")

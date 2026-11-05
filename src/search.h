@@ -80,7 +80,6 @@ namespace search
     void setContempt(int value);
     void setAnalyseMode(bool enabled);
     void setShowRefutations(bool enabled);
-    void setPonder(bool enabled);
     void setMoveOverhead(int ms);
     int hashSize();
     int threadCount();

@@ -132,7 +132,6 @@ namespace
     int contemptSetting = 0;
     bool analyseMode = false;
     bool showRefutations = false;
-    bool ponderSetting = false;
     int64_t nodesLimit = 0;
     int mateGoal = 0;
     Color activeUs = WHITE;
@@ -2315,11 +2314,6 @@ void search::setAnalyseMode(bool enabled)
 void search::setShowRefutations(bool enabled)
 {
     showRefutations = enabled;
-}
-
-void search::setPonder(bool enabled)
-{
-    ponderSetting = enabled;
 }
 
 void search::setMoveOverhead(int ms)
