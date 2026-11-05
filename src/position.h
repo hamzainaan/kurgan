@@ -54,7 +54,7 @@ public:
     void print_board() const;
 
     // Applies a move and returns false without changing the position when it is illegal.
-    bool do_move(Move move);
+    bool do_move(Move move, bool knownLegal = false);
 
     // Undoes the last move applied with do_move.
     void undo_move(Move move);

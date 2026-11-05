@@ -111,8 +111,8 @@ namespace movegen
     // Checks whether a move is a capture, promotion or en passant.
     inline bool isTactical(const Position &pos, Move m)
     {
-        return m.isPromotion() || m.isEnPassant()
-               || (!m.isCastling() && pos.board[m.to()] != NO_PIECE);
+        const uint16_t type = m.type();
+        return type == NORMAL ? pos.board[m.to()] != NO_PIECE : type != CASTLING;
     }
 
     void generate_pseudo_legal_moves(const Position &pos, MoveList &list);
@@ -122,4 +122,21 @@ namespace movegen
 
     // Checks whether a pseudo-legal move leaves the king out of check.
     bool is_legal(const Position &pos, Move move);
+
+    struct Legality
+    {
+        Square king = SQ_NONE;
+        Bitboard checkers = 0;
+        Bitboard pinned = 0;
+        Bitboard safe = 0;
+        bool pinsReady = false;
+    };
+
+    Legality legality(const Position &pos);
+
+    bool is_legal(const Position &pos, Move move, Legality &info);
+
+    void generateEvasions(const Position &pos, const Legality &info, MoveList &list);
+
+    bool isPseudoLegal(const Position &pos, Move move);
 }

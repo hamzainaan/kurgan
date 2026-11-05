@@ -204,9 +204,12 @@ void Position::removePiece(Square square)
         nonPawnKey[colorOf(piece)] ^= pieceKeys[piece][square];
 }
 
-bool Position::do_move(Move move)
+bool Position::do_move(Move move, bool knownLegal)
 {
     initZobrist();
+
+    if (!knownLegal && !movegen::isPseudoLegal(*this, move))
+        return false;
 
     const Color us = sideToMove;
     const Color them = static_cast<Color>(us ^ 1);
@@ -218,7 +221,7 @@ bool Position::do_move(Move move)
 
     // Verify castling here because callers may only generate pseudo-legal moves.
     // In Chess960 the king and rook can start on any back-rank file.
-    if (castling && !movegen::canCastle(*this, move))
+    if (castling && !knownLegal && !movegen::canCastle(*this, move))
         return false;
 
     UndoInfo &undo = undoStack[undoCount];
@@ -281,7 +284,13 @@ bool Position::do_move(Move move)
         }
     }
 
-    enPassantSquare = (pt == PAWN && (from ^ to) == 16) ? static_cast<Square>((from + to) / 2) : SQ_NONE;
+    enPassantSquare = SQ_NONE;
+    if (pt == PAWN && (from ^ to) == 16)
+    {
+        const Square passed = static_cast<Square>((from + to) / 2);
+        if (movegen::pawnAttacksFrom(us, passed) & byColor[them] & byType[PAWN])
+            enPassantSquare = passed;
+    }
 
     if (pt == PAWN || undo.capturedPiece != NO_PIECE)
         halfmoveClock = 0;
@@ -304,6 +313,9 @@ bool Position::do_move(Move move)
         historyStart = historyCount;
     historyKeys[historyCount & (MAX_HISTORY - 1)] = zobristKey;
     ++historyCount;
+
+    if (knownLegal)
+        return true;
 
     Square ksq = castling ? castlingKingTo(move) : to;
     if (!castling && pt != KING)

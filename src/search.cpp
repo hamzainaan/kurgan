@@ -514,24 +514,20 @@ namespace
         }
     }
 
+    constexpr int16_t EMPTY_CONT_ROW[PIECE_TO_NB] = {};
+
     struct QuietHistory
     {
         const int (*mainRows)[SQUARE_NB];
         const int16_t *pawnRow;
         const int16_t *contRow[CONT_PLIES];
-        int contWeight[CONT_PLIES];
-        int contCount = 0;
 
         QuietHistory(const Position &pos, int ply)
             : mainRows(history[pos.sideToMove]),
               pawnRow(pawnHistoryRow(pos))
         {
             for (int i = 0; i < CONT_PLIES; ++i)
-                if (contRows[i][ply] != nullptr)
-                {
-                    contRow[contCount] = contRows[i][ply];
-                    contWeight[contCount++] = CONT_WEIGHT[i];
-                }
+                contRow[i] = contRows[i][ply] != nullptr ? contRows[i][ply] : EMPTY_CONT_ROW;
         }
 
         int score(const Position &pos, Move m) const
@@ -539,8 +535,8 @@ namespace
             const Square to = moveTarget(m);
             const int pieceTo = pieceToIndex(pos.board[m.from()], to);
             int cont = 0;
-            for (int i = 0; i < contCount; ++i)
-                cont += contWeight[i] * contRow[i][pieceTo];
+            for (int i = 0; i < CONT_PLIES; ++i)
+                cont += CONT_WEIGHT[i] * contRow[i][pieceTo];
 
             return mainRows[m.from()][to] + CONT_SCALE * (cont / CONT_WEIGHT_SUM) / 100 +
                    PAWN_SCALE * pawnRow[pieceTo] / 100;
@@ -682,7 +678,7 @@ namespace
                 std::swap(moves[index], moves[best]);
         }
 
-        int skipQuiets(const Position &pos, Move excluded)
+        int skipQuiets(const Position &pos, Move excluded, movegen::Legality &legality)
         {
             int dropped = 0;
             if (!quietsScored)
@@ -692,7 +688,8 @@ namespace
                 for (int i = 0; i < list.size; ++i)
                 {
                     const Move m = list.moves[i];
-                    if (m != ttMove && m != excluded && !movegen::isTactical(pos, m))
+                    if (m != ttMove && m != excluded && !movegen::isTactical(pos, m)
+                        && movegen::is_legal(pos, m, legality))
                         ++dropped;
                 }
             }
@@ -702,7 +699,7 @@ namespace
             {
                 if (movegen::isTactical(pos, moves[j].move))
                     moves[kept++] = moves[j];
-                else if (moves[j].move != excluded)
+                else if (moves[j].move != excluded && movegen::is_legal(pos, moves[j].move, legality))
                     ++dropped;
             }
             count = kept;
@@ -858,15 +855,14 @@ namespace
 
     bool isCheckmated(Position &pos)
     {
-        const Color us = pos.sideToMove;
-        const Square ksq = pos.kingSquare(us);
-        if (ksq == SQ_NONE || !movegen::squareAttacked(pos, ksq, static_cast<Color>(us ^ 1)))
+        movegen::Legality legality = movegen::legality(pos);
+        if (!legality.checkers)
             return false;
 
         MoveList list;
-        movegen::generate_pseudo_legal_moves(pos, list);
+        movegen::generateEvasions(pos, legality, list);
         for (int i = 0; i < list.count(); ++i)
-            if (movegen::is_legal(pos, list[i]))
+            if (movegen::is_legal(pos, list[i], legality))
                 return false;
 
         return true;
@@ -924,11 +920,13 @@ namespace
         {
             MoveList list;
             movegen::generate_pseudo_legal_moves(pos, list);
+            movegen::Legality legality = movegen::legality(pos);
             for (int i = 0; i < list.count(); ++i)
             {
                 const Move m = list[i];
-                if (!movegen::is_legal(pos, m) || !pos.do_move(m))
+                if (!movegen::is_legal(pos, m, legality))
                     continue;
+                pos.do_move(m, true);
 
                 if (pos.sideToMove == mated && isCheckmated(pos))
                 {
@@ -993,7 +991,8 @@ namespace
         const Move prevMove = moveStack[ply];
         const Move counter = prevMove == Move() ? Move() : counterMoveEntry(us, prevMove);
 
-        if (ply > 0 && (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos) || pos.isRepetition(ply)))
+        if (ply > 0 && ((pos.halfmoveClock >= 100 && !isCheckmated(pos)) || isInsufficientMaterial(pos)
+                        || pos.isRepetition(ply)))
             return drawScore(pos) + DRAW_JITTER - static_cast<int>(nodes & 2);
 
         const tt::Entry *tte = excluded == Move() ? tt::probe(key) : nullptr;
@@ -1035,9 +1034,8 @@ namespace
 
         setContinuationRows(pos, ply);
 
-        const Square ksq = pos.kingSquare(us);
-        const bool inCheck = ksq != SQ_NONE &&
-                             movegen::squareAttacked(pos, ksq, static_cast<Color>(us ^ 1));
+        movegen::Legality legality = movegen::legality(pos);
+        const bool inCheck = legality.checkers != 0;
 
         int staticEval;
         int rawEval = NO_EVAL;
@@ -1142,8 +1140,9 @@ namespace
             for (int i = 0; i < probcutList.size; ++i)
             {
                 const Move m = probcutList.moves[i];
-                if (!see::ge(pos, m, probcutBeta - staticEval) || !pos.do_move(m))
+                if (!see::ge(pos, m, probcutBeta - staticEval) || !movegen::is_legal(pos, m, legality))
                     continue;
+                pos.do_move(m, true);
 
                 moveStack[ply + 1] = m;
                 int score = -quiescence(pos, -probcutBeta, -probcutBeta + 1, ply + 1);
@@ -1170,7 +1169,10 @@ namespace
         }
 
         MoveList list;
-        movegen::generate_pseudo_legal_moves(pos, list);
+        if (inCheck)
+            movegen::generateEvasions(pos, legality, list);
+        else
+            movegen::generate_pseudo_legal_moves(pos, list);
 
         MovePicker picker;
         picker.init(pos, list, ttMove, counter, ply, false);
@@ -1192,6 +1194,8 @@ namespace
         {
             if (m == excluded || (ply == 0 && (!inSearchMoves(m) || isExcludedRootMove(m))))
                 continue;
+            if (!movegen::is_legal(pos, m, legality))
+                continue;
 
             const bool quiet = !movegen::isTactical(pos, m);
             const int histScore = picker.lastHistory;
@@ -1202,7 +1206,7 @@ namespace
             if (canPrune && quiet && !inCheck && depth <= tuned::LMP_DEPTH &&
                 moveCount > (tuned::LMP_BASE + depth * depth) / (2 - improving))
             {
-                const int skipped = picker.skipQuiets(pos, excluded);
+                const int skipped = picker.skipQuiets(pos, excluded, legality);
                 moveCount += skipped;
                 stats::current().lmpPruned += static_cast<uint64_t>(1 + skipped);
                 continue;
@@ -1278,8 +1282,7 @@ namespace
             else if (checks && ply < 2 * rootDepth)
                 extension = 1;
 
-            if (!pos.do_move(m))
-                continue;
+            pos.do_move(m, true);
 
             moveStack[ply + 1] = m;
             doubleExtensions[ply + 1] = doubleExtensions[ply] + (extension == 2);
@@ -1481,19 +1484,19 @@ namespace
             seldepth = ply;
 
         const Color us = pos.sideToMove;
-        const Color them = static_cast<Color>(us ^ 1);
-        const Square ksq = pos.kingSquare(us);
-        const bool inCheck = ksq != SQ_NONE && movegen::squareAttacked(pos, ksq, them);
+        movegen::Legality legality = movegen::legality(pos);
+        const bool inCheck = legality.checkers != 0;
         const uint64_t key = pos.zobristKey;
         const int originalAlpha = alpha;
 
         const Move prevMove = moveStack[ply];
         const Move counter = prevMove == Move() ? Move() : counterMoveEntry(us, prevMove);
 
-        if (pos.halfmoveClock >= 100 || pos.isRepetition(ply) || isInsufficientMaterial(pos))
+        if ((pos.halfmoveClock >= 100 && !isCheckmated(pos)) || pos.isRepetition(ply) || isInsufficientMaterial(pos))
             return drawScore(pos);
 
         const tt::Entry *tte = tt::probe(key);
+        const bool ttPv = tte != nullptr && tte->pv();
         Move ttMove{};
         int ttEval = NO_EVAL;
         int ttScore = 0;
@@ -1535,7 +1538,7 @@ namespace
 
         MoveList list;
         if (inCheck)
-            movegen::generate_pseudo_legal_moves(pos, list);
+            movegen::generateEvasions(pos, legality, list);
         else
             movegen::generate_tactical_moves(pos, list);
 
@@ -1577,8 +1580,9 @@ namespace
             else if (bestScore > -MATE_THRESHOLD && !movegen::isTactical(pos, m))
                 continue;
 
-            if (!pos.do_move(m))
+            if (!movegen::is_legal(pos, m, legality))
                 continue;
+            pos.do_move(m, true);
 
             moveStack[ply + 1] = m;
             ++legalMoves;
@@ -1613,7 +1617,7 @@ namespace
             return -MATE + ply;
 
         const int bound = bestScore >= beta ? BOUND_LOWER : bestScore > originalAlpha ? BOUND_EXACT : BOUND_UPPER;
-        tt::store(key, bestMove, bestScore, 0, bound, ply, rawEval, tte != nullptr && tte->pv());
+        tt::store(key, bestMove, bestScore, 0, bound, ply, rawEval, ttPv);
         return bestScore;
     }
 
