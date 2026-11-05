@@ -25,6 +25,7 @@
 
 namespace
 {
+    // Opponent data received through UCI_Opponent
     struct Opponent
     {
         std::string title = "none";
@@ -44,12 +45,14 @@ namespace
         return text;
     }
 
+    // Parses the value of a UCI check option
     bool checkValue(const std::string &value)
     {
         const std::string lowered = asciiLower(value);
         return lowered == "true" || lowered == "1";
     }
 
+    // Parses a whole token as an integer
     bool parseInteger(const std::string &token, int &value)
     {
         try
@@ -67,6 +70,7 @@ namespace
         }
     }
 
+    // Detects the tokens that end a searchmoves list
     bool isGoKeyword(const std::string &token)
     {
         static const char *const keywords[] = {
@@ -78,6 +82,7 @@ namespace
         return false;
     }
 
+    // Stores the opponent and ignores malformed values
     void setOpponent(const std::string &value)
     {
         if (value.empty() || value == "<empty>")
@@ -201,6 +206,7 @@ namespace
         return Move();
     }
 
+    // Applies a position command and keeps the old position on an invalid FEN
     void parsePosition(std::istringstream &ss, Position &pos)
     {
         std::string token;
@@ -272,6 +278,7 @@ namespace
         }
     }
 
+    // Parses go arguments into search limits
     search::SearchLimits parseGo(std::istringstream &ss, const Position &pos)
     {
         search::SearchLimits limits;
@@ -336,6 +343,7 @@ namespace
         return limits;
     }
 
+    // Runs searches in the background so the loop keeps reading commands
     class SearchThread
     {
     public:
@@ -366,6 +374,7 @@ namespace
         bool active = false;
     };
 
+    // Answers the uci command with the engine id and options
     void printIdentity()
     {
         std::lock_guard<std::mutex> lock(search::outputLock());
@@ -398,6 +407,7 @@ namespace
         std::cout << "uciok" << std::endl;
     }
 
+    // Splits a setoption command into its name and value
     void parseSetOption(std::istringstream &ss, std::string &name, std::string &value)
     {
         std::string token;
@@ -430,6 +440,7 @@ namespace
         }
     }
 
+    // Applies a named option and reports unknown or invalid ones
     void applyOption(const std::string &name, const std::string &value)
     {
         const std::string key = asciiLower(name);
@@ -471,6 +482,7 @@ namespace
         }
     }
 
+    // Runs the perft suite or divide or a plain node count
     void runPerft(std::istringstream &ss, Position &pos)
     {
         std::string arg;
@@ -508,6 +520,7 @@ namespace
         }
     }
 
+    // Prints the hand crafted and NNUE and final evaluations
     void printEval(const Position &pos)
     {
 #ifdef KURGAN_HCE_OFF
@@ -520,6 +533,7 @@ namespace
         std::cout << "eval final " << evaluate::evaluate(pos) << std::endl;
     }
 
+    // Switches debug mode or prints the board when given no argument
     void handleDebug(std::istringstream &ss, const Position &pos, bool searching)
     {
         std::string arg;
@@ -546,6 +560,7 @@ namespace
         }
     }
 
+    // Parses datagen arguments into options
     datagen::Options parseDatagenOptions(std::istringstream &ss)
     {
         datagen::Options options;
