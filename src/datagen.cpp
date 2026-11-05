@@ -282,22 +282,120 @@ namespace
 
         std::fclose(file);
     }
+
+    datagen::Options normalized(const datagen::Options &requested)
+    {
+        datagen::Options options = requested;
+        options.workers = std::clamp(options.workers, 1, search::maxThreadCount());
+        options.softNodes = std::max(options.softNodes, 1);
+        options.hardNodes = std::max(options.hardNodes, options.softNodes);
+        options.randomPlies = std::max(options.randomPlies, 0);
+        if (options.seed == 0)
+            options.seed = (static_cast<uint64_t>(std::random_device{}()) << 32)
+                           ^ static_cast<uint64_t>(Clock::now().time_since_epoch().count());
+
+#if defined(_WIN32)
+        options.workers = 1;
+#endif
+        return options;
+    }
+
+    std::string netTag()
+    {
+        char tag[16];
+        if (nnue::active())
+            std::snprintf(tag, sizeof(tag), "%08x", static_cast<unsigned>(nnue::hash()));
+        else
+            std::snprintf(tag, sizeof(tag), "hce");
+        return tag;
+    }
+
+    struct WorkPlan
+    {
+        std::vector<std::string> paths;
+        std::vector<uint64_t> seeds;
+        uint64_t perWorker = 0;
+        uint64_t target = 0;
+        uint64_t base = 0;
+    };
+
+    WorkPlan planWork(const datagen::Options &options, const std::string &tag)
+    {
+        WorkPlan plan;
+        for (int i = 0; i < options.workers; ++i)
+        {
+            plan.seeds.push_back(options.seed + 0x9E3779B97F4A7C15ULL * static_cast<uint64_t>(i + 1));
+            plan.paths.push_back((std::filesystem::path(options.out)
+                                  / (tag + "-" + std::to_string(options.seed) + "-" + std::to_string(i) + ".data"))
+                                     .string());
+        }
+
+        plan.perWorker = (options.positions + static_cast<uint64_t>(options.workers) - 1)
+                         / static_cast<uint64_t>(options.workers);
+        plan.target = plan.perWorker * static_cast<uint64_t>(options.workers);
+        plan.base = recordsIn(plan.paths);
+        return plan;
+    }
+
+#if defined(_WIN32)
+    void runWorkers(const datagen::Options &options, const WorkPlan &plan, Clock::time_point)
+    {
+        const int savedThreads = search::threadSetting();
+        const int savedHash = search::hashSize();
+        work(options, plan.perWorker, plan.seeds[0], plan.paths[0], true);
+        search::setSilent(false);
+        search::setThreads(savedThreads);
+        search::setHashSize(savedHash);
+    }
+#else
+    void runWorkers(const datagen::Options &options, const WorkPlan &plan, Clock::time_point start)
+    {
+        std::cout.flush();
+        std::vector<pid_t> children;
+        for (int i = 0; i < options.workers; ++i)
+        {
+            const pid_t pid = fork();
+            if (pid == 0)
+            {
+                work(options, plan.perWorker, plan.seeds[static_cast<size_t>(i)], plan.paths[static_cast<size_t>(i)], false);
+                _exit(0);
+            }
+            if (pid < 0)
+            {
+                std::cout << "info string datagen fork failed after " << i << " workers" << std::endl;
+                break;
+            }
+            children.push_back(pid);
+        }
+
+        Clock::time_point last = start;
+        size_t running = children.size();
+        while (running > 0)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            for (pid_t &pid : children)
+            {
+                int status = 0;
+                if (pid > 0 && waitpid(pid, &status, WNOHANG) == pid)
+                {
+                    pid = 0;
+                    --running;
+                }
+            }
+
+            if (Clock::now() - last >= std::chrono::seconds(REPORT_SECONDS))
+            {
+                last = Clock::now();
+                report(recordsIn(plan.paths) - plan.base, plan.target, start);
+            }
+        }
+    }
+#endif
 }
 
 void datagen::run(const Options &requested)
 {
-    Options options = requested;
-    options.workers = std::clamp(options.workers, 1, search::maxThreadCount());
-    options.softNodes = std::max(options.softNodes, 1);
-    options.hardNodes = std::max(options.hardNodes, options.softNodes);
-    options.randomPlies = std::max(options.randomPlies, 0);
-    if (options.seed == 0)
-        options.seed = (static_cast<uint64_t>(std::random_device{}()) << 32)
-                       ^ static_cast<uint64_t>(Clock::now().time_since_epoch().count());
-
-#if defined(_WIN32)
-    options.workers = 1;
-#endif
+    const Options options = normalized(requested);
 
     std::error_code ec;
     std::filesystem::create_directories(options.out, ec);
@@ -307,88 +405,21 @@ void datagen::run(const Options &requested)
         return;
     }
 
-    char tag[16];
-    if (nnue::active())
-        std::snprintf(tag, sizeof(tag), "%08x", static_cast<unsigned>(nnue::hash()));
-    else
-        std::snprintf(tag, sizeof(tag), "hce");
-
-    std::vector<std::string> paths;
-    std::vector<uint64_t> seeds;
-    for (int i = 0; i < options.workers; ++i)
-    {
-        const uint64_t seed = options.seed + 0x9E3779B97F4A7C15ULL * static_cast<uint64_t>(i + 1);
-        paths.push_back((std::filesystem::path(options.out)
-                         / (std::string(tag) + "-" + std::to_string(options.seed) + "-" + std::to_string(i) + ".data"))
-                            .string());
-        seeds.push_back(seed);
-    }
-
-    const uint64_t perWorker = (options.positions + static_cast<uint64_t>(options.workers) - 1)
-                               / static_cast<uint64_t>(options.workers);
-    const uint64_t target = perWorker * static_cast<uint64_t>(options.workers);
-    const uint64_t base = recordsIn(paths);
+    const std::string tag = netTag();
+    const WorkPlan plan = planWork(options, tag);
 
     std::cout << "info string datagen net " << tag << " workers " << options.workers
-              << " positions " << target << " softnodes " << options.softNodes
+              << " positions " << plan.target << " softnodes " << options.softNodes
               << " hardnodes " << options.hardNodes << " randomplies " << options.randomPlies
               << " hash " << options.hash << " seed " << options.seed
               << " out " << options.out << std::endl;
 
     const Clock::time_point start = Clock::now();
+    runWorkers(options, plan, start);
 
-#if defined(_WIN32)
-    const int savedThreads = search::threadSetting();
-    const int savedHash = search::hashSize();
-    work(options, perWorker, seeds[0], paths[0], true);
-    search::setSilent(false);
-    search::setThreads(savedThreads);
-    search::setHashSize(savedHash);
-#else
-    std::cout.flush();
-    std::vector<pid_t> children;
-    for (int i = 0; i < options.workers; ++i)
-    {
-        const pid_t pid = fork();
-        if (pid == 0)
-        {
-            work(options, perWorker, seeds[static_cast<size_t>(i)], paths[static_cast<size_t>(i)], false);
-            _exit(0);
-        }
-        if (pid < 0)
-        {
-            std::cout << "info string datagen fork failed after " << i << " workers" << std::endl;
-            break;
-        }
-        children.push_back(pid);
-    }
-
-    Clock::time_point last = start;
-    size_t running = children.size();
-    while (running > 0)
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        for (pid_t &pid : children)
-        {
-            int status = 0;
-            if (pid > 0 && waitpid(pid, &status, WNOHANG) == pid)
-            {
-                pid = 0;
-                --running;
-            }
-        }
-
-        if (Clock::now() - last >= std::chrono::seconds(REPORT_SECONDS))
-        {
-            last = Clock::now();
-            report(recordsIn(paths) - base, target, start);
-        }
-    }
-#endif
-
-    report(recordsIn(paths) - base, target, start);
+    report(recordsIn(plan.paths) - plan.base, plan.target, start);
     std::cout << "info string datagen done";
-    for (const std::string &path : paths)
+    for (const std::string &path : plan.paths)
         std::cout << ' ' << path;
     std::cout << std::endl;
 }
