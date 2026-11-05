@@ -7,6 +7,7 @@
 
 namespace
 {
+    // Known leaf counts by depth up to maxDepth
     struct TestCase
     {
         const char *fen;
@@ -73,6 +74,7 @@ namespace
          true},
     };
 
+    // Generates evasions in check and every pseudo legal move otherwise
     void generateMoves(const Position &pos, const movegen::Legality &legality, MoveList &list)
     {
         if (legality.checkers)
