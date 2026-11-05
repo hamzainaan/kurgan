@@ -28,6 +28,7 @@ namespace
         return whole == 0 ? 0.0 : 100.0 * static_cast<double>(part) / static_cast<double>(whole);
     }
 
+    // Sums the counters of every record
     stats::Tally merged(const std::vector<Record> &entries)
     {
         stats::Tally t;
@@ -79,6 +80,7 @@ namespace
         return t;
     }
 
+    // Appends one line per worker
     void appendWorkerSummary(std::ostringstream &out, const std::vector<Record> &entries)
     {
         struct WorkerSummary

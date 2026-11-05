@@ -5,6 +5,7 @@
 
 namespace stats
 {
+    // Search counters collected per thread
     struct Tally
     {
         uint64_t nodes = 0;
@@ -63,6 +64,7 @@ namespace stats
 
     // Records a finished worker's counters.
     void record(int worker, int depth, int completed);
+    // Drops every recorded worker tally
     void clearRecords();
 
     // True when each search prints its statistics table.
@@ -71,5 +73,6 @@ namespace stats
 
     // Returns the aggregate table accumulated since the last clearRecords call.
     std::string report();
+    // Prints the report as info string lines
     void print();
 }
