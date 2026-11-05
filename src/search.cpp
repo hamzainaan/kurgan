@@ -584,8 +584,7 @@ namespace
         Move pv[MAX_PLY]{};
     };
 
-    // Move ordering bands from the table move down to quiet history
-    constexpr int TT_MOVE_SCORE = 10000000;
+    // Move ordering bands from good captures down to quiet history
     constexpr int CAPTURE_BAND = 6000000;
     constexpr int KILLER1_SCORE = 5000000;
     constexpr int KILLER2_SCORE = 4900000;
