@@ -315,57 +315,6 @@ namespace
         return pinned;
     }
 
-    [[maybe_unused]] void putPiece(Position &pos, Piece p, Square sq)
-    {
-        const Bitboard bit = 1ULL << sq;
-        pos.board[sq] = p;
-        pos.byPiece[p] |= bit;
-        pos.byColor[colorOf(p)] |= bit;
-        pos.byType[typeOf(p)] |= bit;
-    }
-
-    [[maybe_unused]] void removePiece(Position &pos, Square sq)
-    {
-        const Piece p = pos.board[sq];
-        if (p == NO_PIECE)
-            return;
-        const Bitboard notBit = ~(1ULL << sq);
-        pos.board[sq] = NO_PIECE;
-        pos.byPiece[p] &= notBit;
-        pos.byColor[colorOf(p)] &= notBit;
-        pos.byType[typeOf(p)] &= notBit;
-    }
-
-    [[maybe_unused]] void makeMove(Position &pos, Move m)
-    {
-        const Color us = pos.sideToMove;
-        const Color them = static_cast<Color>(us ^ 1);
-        const Square from = m.from();
-        const Square to = m.to();
-
-        const Piece piece = pos.board[from];
-        removePiece(pos, from);
-
-        if (m.isCastling())
-        {
-            // Lift both pieces before placing them, so they can swap squares in Chess960.
-            removePiece(pos, to);
-            putPiece(pos, makePiece(us, KING), castlingKingTo(m));
-            putPiece(pos, makePiece(us, ROOK), castlingRookTo(m));
-            pos.sideToMove = them;
-            return;
-        }
-
-        if (m.isEnPassant())
-            removePiece(pos, static_cast<Square>(to + (us == WHITE ? -8 : 8)));
-        else if (pos.board[to] != NO_PIECE)
-            removePiece(pos, to);
-
-        putPiece(pos, m.isPromotion() ? makePiece(us, m.promoType()) : piece, to);
-
-        pos.sideToMove = them;
-    }
-
     // Generates pawn pushes and captures and promotions and en passant within target
     void generatePawnMoves(const Position &pos, Bitboard empty, MoveList &list, bool tacticalOnly = false,
                            Bitboard target = ~0ULL)
