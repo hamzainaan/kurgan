@@ -49,8 +49,10 @@ public:
     // Parses a FEN string and returns false when it is malformed.
     bool setFen(const std::string &fen);
 
+    // Returns the position as a FEN string
     std::string fen() const;
 
+    // Prints the board and game state for the debug command
     void printBoard() const;
 
     // Applies a move and returns false without changing the position when it is illegal.
@@ -59,6 +61,7 @@ public:
     // Undoes the last move applied with do_move.
     void undoMove(Move move);
 
+    // Passes the turn without moving for null move pruning
     void doNullMove();
     void undoNullMove();
 
@@ -79,9 +82,11 @@ public:
     int halfmoveClock = 0;
     int fullmoveNumber = 1;
 
+    // Rook origin per color and side which can be any file in Chess960
     std::array<std::array<Square, CASTLING_SIDE_NB>, COLOR_NB> castlingRookSquare{};
 
     Square kingSquare(Color c) const;
+    // Returns castling rights in classical or Shredder FEN letters
     std::string castlingString() const;
 
     // Incrementally maintained Zobrist key.
@@ -93,6 +98,7 @@ private:
     static constexpr int MAX_UNDO = 256;
     static constexpr int MAX_HISTORY = 1024;
 
+    // State a move cannot recompute when it is undone
     struct UndoInfo
     {
         Piece movedPiece = NO_PIECE;
@@ -112,10 +118,12 @@ private:
     int historyCount = 0;
     int historyStart = 0;
 
+    // Empties the board and resets every field
     void clear();
     void putPiece(Piece piece, Square square);
     void removePiece(Square square);
 
+    // FEN field parsers used by setFen
     bool parseBoard(const std::string &boardStr);
     bool parseCastling(const std::string &castlingStr);
     bool parseEnPassant(const std::string &epStr);

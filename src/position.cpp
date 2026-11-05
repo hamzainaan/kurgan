@@ -66,6 +66,7 @@ namespace
     std::array<uint64_t, FILE_NB> enPassantKeys{};
     bool zobristReady = false;
 
+    // Builds the Zobrist keys once from a fixed seed
     void initZobrist()
     {
         if (zobristReady)
@@ -81,6 +82,7 @@ namespace
         zobristReady = true;
     }
 
+    // Only the file of the en passant square enters the key
     uint64_t epKey(Square s)
     {
         return s == SQ_NONE ? 0 : enPassantKeys[s & 7];
@@ -91,6 +93,7 @@ namespace
         return 0xFFULL << (8 * static_cast<int>(c == WHITE ? RANK_1 : RANK_8));
     }
 
+    // Returns the square in coordinate notation
     std::string squareName(Square s)
     {
         return {static_cast<char>('a' + fileOf(s)), static_cast<char>('1' + rankOf(s))};
@@ -178,6 +181,7 @@ std::string Position::castlingString() const
     return out.empty() ? "-" : out;
 }
 
+// Places a piece and updates the bitboards and keys
 void Position::putPiece(Piece piece, Square square)
 {
     const Bitboard bit = 1ULL << square;
