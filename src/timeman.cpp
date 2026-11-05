@@ -13,6 +13,7 @@ namespace
 {
     using Clock = std::chrono::steady_clock;
 
+    // Weights and limits of the time heuristics
     constexpr double PRESSURE_EMA = 0.5;
     constexpr double PRESSURE_SCALE = 120.0;
     constexpr double SWING_SCALE = 50.0;
@@ -67,6 +68,7 @@ namespace
     constexpr double FALLING_W = 0.60;
     constexpr double ITERATION_GROWTH = 1.2;
 
+    // Budget of the current search shared with the search threads
     std::atomic<Clock::rep> startRep{0};
     std::atomic<Clock::rep> deadlineRep{0};
     std::atomic<int64_t> baseOptimumMs{0};
@@ -77,16 +79,19 @@ namespace
     std::atomic<bool> failingLow{false};
     std::atomic<int> easyStopDepth{0};
 
+    // Score trend across moves
     int64_t lastScore = 0;
     bool hasLastScore = false;
     double pressure = 0.0;
     int previousDepth = 0;
     int64_t moveOverheadMs = search::MOVE_OVERHEAD_DEFAULT;
 
+    // Root features sampled before the search
     double rootTension = 0.0;
     double rootDanger = 0.0;
     bool singleReply = false;
 
+    // Latest iteration data from the search
     int observedScore = 0;
     int observedSwing = 0;
     int observedStable = 0;
@@ -101,6 +106,7 @@ namespace
         deadlineRep.store(t.time_since_epoch().count(), std::memory_order_relaxed);
     }
 
+    // Rates from 0 to 1 how much extra time the position deserves
     double criticality(const Position &pos, int score, int scoreDrop, int stableIterations)
     {
         const int swing = scoreDrop < 0 ? -scoreDrop : scoreDrop;
@@ -123,6 +129,7 @@ namespace
                           0.0, 1.0);
     }
 
+    // Rates from 0 to 1 how tactical the last iteration looked
     double tacticality()
     {
         if (observedScore >= tt::MATE_THRESHOLD || observedScore <= -tt::MATE_THRESHOLD)
@@ -138,6 +145,7 @@ namespace
                           0.0, 1.0);
     }
 
+    // Counts captures that win material
     int winningCaptures(const Position &pos, bool legalOnly)
     {
         MoveList list;
@@ -150,6 +158,7 @@ namespace
         return count;
     }
 
+    // Checks whether the deadline may still be extended
     bool extensible(double tactical)
     {
         return !singleReply && baseOptimumMs.load(std::memory_order_relaxed) > 0

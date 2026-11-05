@@ -13,23 +13,25 @@ namespace manager
 
     // Computes the time budget for the side to move.
     void computeDeadline(const search::SearchLimits &limits, Color us, bool ponderHit = false);
-    void setMoveOverhead(int ms);
+    void setMoveOverhead(int ms); // Reserves time for communication delay
 
     // Supplies the latest score stability data for time decisions.
     void observe(int score, int scoreDrop, int stableIterations);
 
     // Extends the deadline for a tactical position and reports success.
     bool extend();
-    void recordScore(int score, int depth);
-    void reset();
+    void recordScore(int score, int depth); // Records the final score of a move for score pressure
+    void reset(); // Forgets the scores of earlier moves
 
+    // True when a clock budget limits the search
     bool budgeted();
-    int64_t elapsedMs();
-    void rootFailing(bool failing);
+    int64_t elapsedMs(); // Milliseconds since the search started
+    void rootFailing(bool failing); // Marks whether the root currently fails low
 
     // Checks whether the current iteration should stop.
     bool shouldStop(const Position &pos, int score, int scoreDrop, int stableIterations, int depth, int64_t lastIterationMs);
 
+    // Hard deadline the search threads poll
     std::chrono::steady_clock::time_point deadline();
-    void postpone();
+    void postpone(); // Moves the deadline a day ahead
 }
