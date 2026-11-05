@@ -128,6 +128,7 @@ namespace movegen
         Square king = SQ_NONE;
         Bitboard checkers = 0;
         Bitboard pinned = 0;
+        Bitboard safe = 0;
         bool pinsReady = false;
     };
 

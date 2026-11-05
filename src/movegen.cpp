@@ -644,6 +644,9 @@ movegen::Legality movegen::legality(const Position &pos)
 
 bool movegen::is_legal(const Position &pos, Move move, Legality &info)
 {
+    if ((info.safe & (1ULL << move.from())) && !move.isEnPassant())
+        return true;
+
     if (move.isCastling())
         return canCastle(pos, move);
 
@@ -667,6 +670,7 @@ bool movegen::is_legal(const Position &pos, Move move, Legality &info)
     {
         info.pinsReady = true;
         info.pinned = pinnedPieces(pos, info.king);
+        info.safe = pos.byColor[pos.sideToMove] & ~pos.byType[KING] & ~info.pinned;
     }
     return !(info.pinned & (1ULL << from)) || kingSafeAfter(pos, move, info.king);
 }
