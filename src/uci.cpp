@@ -335,6 +335,244 @@ namespace
 
         return limits;
     }
+
+    class SearchThread
+    {
+    public:
+        void start(const Position &pos, const search::SearchLimits &limits)
+        {
+            search::prepare(pos, limits);
+            active = true;
+            thread = std::thread([pos, limits]()
+                                 { search::go(pos, limits); });
+        }
+
+        void join()
+        {
+            if (active)
+            {
+                thread.join();
+                active = false;
+            }
+        }
+
+        bool running() const
+        {
+            return active && search::isRunning();
+        }
+
+    private:
+        std::thread thread;
+        bool active = false;
+    };
+
+    void printIdentity()
+    {
+        std::lock_guard<std::mutex> lock(search::outputLock());
+        std::cout << "id name Kurgan " << KURGAN_VERSION << std::endl;
+        std::cout << "id author Hamza Inan" << std::endl;
+        std::cout << "option name Threads type spin default 1 min " << search::THREADS_MIN
+                  << " max " << search::maxThreadCount() << std::endl;
+        std::cout << "option name Hash type spin default 16 min " << search::HASH_MIN
+                  << " max " << search::HASH_MAX << std::endl;
+        std::cout << "option name Clear Hash type button" << std::endl;
+        std::cout << "option name MultiPV type spin default 1 min " << search::MULTIPV_MIN
+                  << " max " << search::MULTIPV_MAX << std::endl;
+        std::cout << "option name Ponder type check default false" << std::endl;
+        std::cout << "option name Contempt type spin default 0 min " << search::CONTEMPT_MIN
+                  << " max " << search::CONTEMPT_MAX << std::endl;
+        std::cout << "option name Move Overhead type spin default " << search::MOVE_OVERHEAD_DEFAULT
+                  << " min " << search::MOVE_OVERHEAD_MIN << " max " << search::MOVE_OVERHEAD_MAX << std::endl;
+        std::cout << "option name UCI_Chess960 type check default false" << std::endl;
+        std::cout << "option name UCI_AnalyseMode type check default false" << std::endl;
+        std::cout << "option name UCI_ShowRefutations type check default false" << std::endl;
+        std::cout << "option name UCI_Opponent type string default <empty>" << std::endl;
+        std::cout << "option name Use NNUE type check default true" << std::endl;
+        std::cout << "option name Search Stats type check default false" << std::endl;
+        if (nnue::loaded())
+            std::cout << "info string evaluation nnue (" << nnue::file() << ") id " << std::hex
+                      << nnue::hash() << std::dec << std::endl;
+        else
+            std::cout << "info string evaluation " << evaluate::name() << " ("
+                      << (nnue::supported() ? nnue::error() : "NNUE not compiled in") << ")" << std::endl;
+        std::cout << "uciok" << std::endl;
+    }
+
+    void parseSetOption(std::istringstream &ss, std::string &name, std::string &value)
+    {
+        std::string token;
+        bool inName = false;
+        bool inValue = false;
+        while (ss >> token)
+        {
+            if (token == "name")
+            {
+                inName = true;
+                inValue = false;
+            }
+            else if (token == "value")
+            {
+                inName = false;
+                inValue = true;
+            }
+            else if (inName)
+            {
+                if (!name.empty())
+                    name += ' ';
+                name += token;
+            }
+            else if (inValue)
+            {
+                if (!value.empty())
+                    value += ' ';
+                value += token;
+            }
+        }
+    }
+
+    void applyOption(const std::string &name, const std::string &value)
+    {
+        const std::string key = asciiLower(name);
+
+        try
+        {
+            if (key == "hash")
+                search::setHashSize(std::stoi(value));
+            else if (key == "threads")
+                search::setThreads(std::stoi(value));
+            else if (key == "ponder")
+                search::setPonder(checkValue(value));
+            else if (key == "uci_chess960")
+                movegen::setChess960(checkValue(value));
+            else if (key == "multipv")
+                search::setMultiPV(std::stoi(value));
+            else if (key == "contempt")
+                search::setContempt(std::stoi(value));
+            else if (key == "uci_analysemode")
+                search::setAnalyseMode(checkValue(value));
+            else if (key == "uci_showrefutations")
+                search::setShowRefutations(checkValue(value));
+            else if (key == "uci_opponent")
+                setOpponent(value);
+            else if (key == "move overhead")
+                search::setMoveOverhead(std::stoi(value));
+            else if (key == "clear hash")
+                search::clear();
+            else if (key == "use nnue")
+                nnue::setEnabled(checkValue(value));
+            else if (key == "search stats")
+                stats::setReporting(checkValue(value));
+            else if (!search::setTuningOption(name, std::stoi(value)))
+                std::cout << "info string unknown option " << name << std::endl;
+        }
+        catch (const std::exception &)
+        {
+            std::cout << "info string invalid value '" << value << "' for option " << name << std::endl;
+        }
+    }
+
+    void runPerft(std::istringstream &ss, Position &pos)
+    {
+        std::string arg;
+        ss >> arg;
+
+        if (arg == "suite")
+        {
+            perft::suite();
+        }
+        else if (arg == "divide")
+        {
+            int depth = 1;
+            ss >> depth;
+            perft::divide(pos, depth);
+        }
+        else
+        {
+            int depth = 1;
+            if (!arg.empty())
+            {
+                std::istringstream ds(arg);
+                if (!(ds >> depth))
+                    depth = 1;
+            }
+
+            const auto start = std::chrono::steady_clock::now();
+            const uint64_t n = perft::nodes(pos, depth);
+            const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     std::chrono::steady_clock::now() - start)
+                                     .count();
+            std::cout << "perft " << depth << " nodes " << n << " time " << ms << " ms";
+            if (ms > 0)
+                std::cout << " nps " << (n * 1000 / static_cast<uint64_t>(ms));
+            std::cout << std::endl;
+        }
+    }
+
+    void printEval(const Position &pos)
+    {
+#ifdef KURGAN_HCE_OFF
+        std::cout << "eval " << evaluate::evaluate(pos) << std::endl;
+#else
+        std::cout << "eval " << evaluate::hce(pos) << std::endl;
+#endif
+        if (nnue::loaded())
+            std::cout << "eval nnue " << nnue::evaluate(pos) << std::endl;
+        std::cout << "eval final " << evaluate::evaluate(pos) << std::endl;
+    }
+
+    void handleDebug(std::istringstream &ss, const Position &pos, bool searching)
+    {
+        std::string arg;
+        ss >> arg;
+
+        if (arg == "on")
+        {
+            if (!debugMode)
+            {
+                debugMode = true;
+                std::lock_guard<std::mutex> lock(search::outputLock());
+                std::cout << "info string debug on" << std::endl;
+            }
+        }
+        else if (arg == "off")
+        {
+            debugMode = false;
+        }
+        else if (arg.empty() && !searching)
+        {
+            std::lock_guard<std::mutex> lock(search::outputLock());
+            pos.printBoard();
+            std::cout << "Fen: " << pos.fen() << std::endl;
+        }
+    }
+
+    datagen::Options parseDatagenOptions(std::istringstream &ss)
+    {
+        datagen::Options options;
+        std::string key;
+        while (ss >> key)
+        {
+            if (key == "threads")
+                ss >> options.workers;
+            else if (key == "positions")
+                ss >> options.positions;
+            else if (key == "softnodes")
+                ss >> options.softNodes;
+            else if (key == "hardnodes")
+                ss >> options.hardNodes;
+            else if (key == "randomplies")
+                ss >> options.randomPlies;
+            else if (key == "hash")
+                ss >> options.hash;
+            else if (key == "seed")
+                ss >> options.seed;
+            else if (key == "out")
+                ss >> options.out;
+            else
+                std::cout << "info string unknown datagen option " << key << std::endl;
+        }
+        return options;
+    }
 }
 
 void uci::loop()
@@ -346,22 +584,7 @@ void uci::loop()
     Position pos;
     pos.setFen(START_FEN);
 
-    std::thread searchThread;
-    bool searchActive = false;
-
-    auto joinSearch = [&]()
-    {
-        if (searchActive)
-        {
-            searchThread.join();
-            searchActive = false;
-        }
-    };
-
-    auto searchRunning = [&]()
-    {
-        return searchActive && search::isRunning();
-    };
+    SearchThread searcher;
 
     std::string line;
     while (std::getline(std::cin, line))
@@ -382,34 +605,7 @@ void uci::loop()
 
         if (cmd == "uci")
         {
-            std::lock_guard<std::mutex> lock(search::outputLock());
-            std::cout << "id name Kurgan " << KURGAN_VERSION << std::endl;
-            std::cout << "id author Hamza Inan" << std::endl;
-            std::cout << "option name Threads type spin default 1 min " << search::THREADS_MIN
-                      << " max " << search::maxThreadCount() << std::endl;
-            std::cout << "option name Hash type spin default 16 min " << search::HASH_MIN
-                      << " max " << search::HASH_MAX << std::endl;
-            std::cout << "option name Clear Hash type button" << std::endl;
-            std::cout << "option name MultiPV type spin default 1 min " << search::MULTIPV_MIN
-                      << " max " << search::MULTIPV_MAX << std::endl;
-            std::cout << "option name Ponder type check default false" << std::endl;
-            std::cout << "option name Contempt type spin default 0 min " << search::CONTEMPT_MIN
-                      << " max " << search::CONTEMPT_MAX << std::endl;
-            std::cout << "option name Move Overhead type spin default " << search::MOVE_OVERHEAD_DEFAULT
-                      << " min " << search::MOVE_OVERHEAD_MIN << " max " << search::MOVE_OVERHEAD_MAX << std::endl;
-            std::cout << "option name UCI_Chess960 type check default false" << std::endl;
-            std::cout << "option name UCI_AnalyseMode type check default false" << std::endl;
-            std::cout << "option name UCI_ShowRefutations type check default false" << std::endl;
-            std::cout << "option name UCI_Opponent type string default <empty>" << std::endl;
-            std::cout << "option name Use NNUE type check default true" << std::endl;
-            std::cout << "option name Search Stats type check default false" << std::endl;
-            if (nnue::loaded())
-                std::cout << "info string evaluation nnue (" << nnue::file() << ") id " << std::hex
-                          << nnue::hash() << std::dec << std::endl;
-            else
-                std::cout << "info string evaluation " << evaluate::name() << " ("
-                          << (nnue::supported() ? nnue::error() : "NNUE not compiled in") << ")" << std::endl;
-            std::cout << "uciok" << std::endl;
+            printIdentity();
         }
         else if (cmd == "isready")
         {
@@ -418,243 +614,90 @@ void uci::loop()
         }
         else if (cmd == "ucinewgame")
         {
-            if (searchRunning())
+            if (searcher.running())
                 continue;
-            joinSearch();
+            searcher.join();
             search::clear();
         }
         else if (cmd == "setoption")
         {
             // UCI only sends setoption while the engine is waiting.
-            if (searchRunning())
+            if (searcher.running())
                 continue;
 
             std::string name;
             std::string value;
-            std::string token;
-            bool inName = false;
-            bool inValue = false;
-            while (ss >> token)
-            {
-                if (token == "name")
-                {
-                    inName = true;
-                    inValue = false;
-                }
-                else if (token == "value")
-                {
-                    inName = false;
-                    inValue = true;
-                }
-                else if (inName)
-                {
-                    if (!name.empty())
-                        name += ' ';
-                    name += token;
-                }
-                else if (inValue)
-                {
-                    if (!value.empty())
-                        value += ' ';
-                    value += token;
-                }
-            }
-
-            joinSearch();
-
-            const std::string key = asciiLower(name);
-
-            try
-            {
-                if (key == "hash")
-                    search::setHashSize(std::stoi(value));
-                else if (key == "threads")
-                    search::setThreads(std::stoi(value));
-                else if (key == "ponder")
-                    search::setPonder(checkValue(value));
-                else if (key == "uci_chess960")
-                    movegen::setChess960(checkValue(value));
-                else if (key == "multipv")
-                    search::setMultiPV(std::stoi(value));
-                else if (key == "contempt")
-                    search::setContempt(std::stoi(value));
-                else if (key == "uci_analysemode")
-                    search::setAnalyseMode(checkValue(value));
-                else if (key == "uci_showrefutations")
-                    search::setShowRefutations(checkValue(value));
-                else if (key == "uci_opponent")
-                    setOpponent(value);
-                else if (key == "move overhead")
-                    search::setMoveOverhead(std::stoi(value));
-                else if (key == "clear hash")
-                    search::clear();
-                else if (key == "use nnue")
-                    nnue::setEnabled(checkValue(value));
-                else if (key == "search stats")
-                    stats::setReporting(checkValue(value));
-                else if (!search::setTuningOption(name, std::stoi(value)))
-                    std::cout << "info string unknown option " << name << std::endl;
-            }
-            catch (const std::exception &)
-            {
-                std::cout << "info string invalid value '" << value << "' for option " << name << std::endl;
-            }
+            parseSetOption(ss, name, value);
+            searcher.join();
+            applyOption(name, value);
         }
         else if (cmd == "position")
         {
-            if (searchRunning())
+            if (searcher.running())
                 continue;
-            joinSearch();
+            searcher.join();
             parsePosition(ss, pos);
         }
         else if (cmd == "go")
         {
-            if (searchRunning())
+            if (searcher.running())
                 continue;
-            joinSearch();
-            const search::SearchLimits limits = parseGo(ss, pos);
-            search::prepare(pos, limits);
-            searchActive = true;
-            searchThread = std::thread([pos, limits]()
-                                       { search::go(pos, limits); });
+            searcher.join();
+            searcher.start(pos, parseGo(ss, pos));
         }
         else if (cmd == "stop")
         {
             // stop outside a search is ignored.
-            if (searchRunning())
+            if (searcher.running())
             {
                 search::stop();
-                joinSearch();
+                searcher.join();
             }
             else
-                joinSearch();
+                searcher.join();
         }
         else if (cmd == "ponderhit")
         {
-            if (searchRunning())
+            if (searcher.running())
                 search::ponderhit();
         }
         else if (cmd == "perft")
         {
-            if (searchRunning())
+            if (searcher.running())
                 continue;
-            joinSearch();
-
-            std::string arg;
-            ss >> arg;
-
-            if (arg == "suite")
-            {
-                perft::suite();
-            }
-            else if (arg == "divide")
-            {
-                int depth = 1;
-                ss >> depth;
-                perft::divide(pos, depth);
-            }
-            else
-            {
-                int depth = 1;
-                if (!arg.empty())
-                {
-                    std::istringstream ds(arg);
-                    if (!(ds >> depth))
-                        depth = 1;
-                }
-
-                const auto start = std::chrono::steady_clock::now();
-                const uint64_t n = perft::nodes(pos, depth);
-                const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                         std::chrono::steady_clock::now() - start)
-                                         .count();
-                std::cout << "perft " << depth << " nodes " << n << " time " << ms << " ms";
-                if (ms > 0)
-                    std::cout << " nps " << (n * 1000 / static_cast<uint64_t>(ms));
-                std::cout << std::endl;
-            }
+            searcher.join();
+            runPerft(ss, pos);
         }
         else if (cmd == "eval")
         {
-            if (searchRunning())
+            if (searcher.running())
                 continue;
-            joinSearch();
-#ifdef KURGAN_HCE_OFF
-            std::cout << "eval " << evaluate::evaluate(pos) << std::endl;
-#else
-            std::cout << "eval " << evaluate::hce(pos) << std::endl;
-#endif
-            if (nnue::loaded())
-                std::cout << "eval nnue " << nnue::evaluate(pos) << std::endl;
-            std::cout << "eval final " << evaluate::evaluate(pos) << std::endl;
+            searcher.join();
+            printEval(pos);
         }
         else if (cmd == "debug")
         {
-            std::string arg;
-            ss >> arg;
-
-            if (arg == "on")
-            {
-                if (!debugMode)
-                {
-                    debugMode = true;
-                    std::lock_guard<std::mutex> lock(search::outputLock());
-                    std::cout << "info string debug on" << std::endl;
-                }
-            }
-            else if (arg == "off")
-            {
-                debugMode = false;
-            }
-            else if (arg.empty() && !searchRunning())
-            {
-                std::lock_guard<std::mutex> lock(search::outputLock());
-                pos.printBoard();
-                std::cout << "Fen: " << pos.fen() << std::endl;
-            }
+            handleDebug(ss, pos, searcher.running());
         }
         else if (cmd == "bench")
         {
-            if (searchRunning())
+            if (searcher.running())
                 continue;
-            joinSearch();
+            searcher.join();
             int depth = 0;
             ss >> depth;
             bench::run(depth);
         }
         else if (cmd == "datagen")
         {
-            if (searchRunning())
+            if (searcher.running())
                 continue;
-            joinSearch();
-            datagen::Options options;
-            std::string key;
-            while (ss >> key)
-            {
-                if (key == "threads")
-                    ss >> options.workers;
-                else if (key == "positions")
-                    ss >> options.positions;
-                else if (key == "softnodes")
-                    ss >> options.softNodes;
-                else if (key == "hardnodes")
-                    ss >> options.hardNodes;
-                else if (key == "randomplies")
-                    ss >> options.randomPlies;
-                else if (key == "hash")
-                    ss >> options.hash;
-                else if (key == "seed")
-                    ss >> options.seed;
-                else if (key == "out")
-                    ss >> options.out;
-                else
-                    std::cout << "info string unknown datagen option " << key << std::endl;
-            }
-            datagen::run(options);
+            searcher.join();
+            datagen::run(parseDatagenOptions(ss));
         }
         else if (cmd == "quit")
         {
-            if (searchRunning())
+            if (searcher.running())
                 search::stop();
             break;
         }
@@ -662,5 +705,5 @@ void uci::loop()
 
     // End of input is equivalent to quit.
     search::stop();
-    joinSearch();
+    searcher.join();
 }
