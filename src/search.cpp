@@ -514,24 +514,20 @@ namespace
         }
     }
 
+    constexpr int16_t EMPTY_CONT_ROW[PIECE_TO_NB] = {};
+
     struct QuietHistory
     {
         const int (*mainRows)[SQUARE_NB];
         const int16_t *pawnRow;
         const int16_t *contRow[CONT_PLIES];
-        int contWeight[CONT_PLIES];
-        int contCount = 0;
 
         QuietHistory(const Position &pos, int ply)
             : mainRows(history[pos.sideToMove]),
               pawnRow(pawnHistoryRow(pos))
         {
             for (int i = 0; i < CONT_PLIES; ++i)
-                if (contRows[i][ply] != nullptr)
-                {
-                    contRow[contCount] = contRows[i][ply];
-                    contWeight[contCount++] = CONT_WEIGHT[i];
-                }
+                contRow[i] = contRows[i][ply] != nullptr ? contRows[i][ply] : EMPTY_CONT_ROW;
         }
 
         int score(const Position &pos, Move m) const
@@ -539,8 +535,8 @@ namespace
             const Square to = moveTarget(m);
             const int pieceTo = pieceToIndex(pos.board[m.from()], to);
             int cont = 0;
-            for (int i = 0; i < contCount; ++i)
-                cont += contWeight[i] * contRow[i][pieceTo];
+            for (int i = 0; i < CONT_PLIES; ++i)
+                cont += CONT_WEIGHT[i] * contRow[i][pieceTo];
 
             return mainRows[m.from()][to] + CONT_SCALE * (cont / CONT_WEIGHT_SUM) / 100 +
                    PAWN_SCALE * pawnRow[pieceTo] / 100;
