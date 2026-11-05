@@ -1495,6 +1495,7 @@ namespace
             return drawScore(pos);
 
         const tt::Entry *tte = tt::probe(key);
+        const bool ttPv = tte != nullptr && tte->pv();
         Move ttMove{};
         int ttEval = NO_EVAL;
         int ttScore = 0;
@@ -1615,7 +1616,7 @@ namespace
             return -MATE + ply;
 
         const int bound = bestScore >= beta ? BOUND_LOWER : bestScore > originalAlpha ? BOUND_EXACT : BOUND_UPPER;
-        tt::store(key, bestMove, bestScore, 0, bound, ply, rawEval, tte != nullptr && tte->pv());
+        tt::store(key, bestMove, bestScore, 0, bound, ply, rawEval, ttPv);
         return bestScore;
     }
 
