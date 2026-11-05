@@ -682,7 +682,7 @@ namespace
                 std::swap(moves[index], moves[best]);
         }
 
-        int skipQuiets(const Position &pos, Move excluded)
+        int skipQuiets(const Position &pos, Move excluded, movegen::Legality &legality)
         {
             int dropped = 0;
             if (!quietsScored)
@@ -692,7 +692,8 @@ namespace
                 for (int i = 0; i < list.size; ++i)
                 {
                     const Move m = list.moves[i];
-                    if (m != ttMove && m != excluded && !movegen::isTactical(pos, m))
+                    if (m != ttMove && m != excluded && !movegen::isTactical(pos, m)
+                        && movegen::is_legal(pos, m, legality))
                         ++dropped;
                 }
             }
@@ -702,7 +703,7 @@ namespace
             {
                 if (movegen::isTactical(pos, moves[j].move))
                     moves[kept++] = moves[j];
-                else if (moves[j].move != excluded)
+                else if (moves[j].move != excluded && movegen::is_legal(pos, moves[j].move, legality))
                     ++dropped;
             }
             count = kept;
@@ -1193,6 +1194,8 @@ namespace
         {
             if (m == excluded || (ply == 0 && (!inSearchMoves(m) || isExcludedRootMove(m))))
                 continue;
+            if (!movegen::is_legal(pos, m, legality))
+                continue;
 
             const bool quiet = !movegen::isTactical(pos, m);
             const int histScore = picker.lastHistory;
@@ -1203,7 +1206,7 @@ namespace
             if (canPrune && quiet && !inCheck && depth <= tuned::LMP_DEPTH &&
                 moveCount > (tuned::LMP_BASE + depth * depth) / (2 - improving))
             {
-                const int skipped = picker.skipQuiets(pos, excluded);
+                const int skipped = picker.skipQuiets(pos, excluded, legality);
                 moveCount += skipped;
                 stats::current().lmpPruned += static_cast<uint64_t>(1 + skipped);
                 continue;
@@ -1279,8 +1282,6 @@ namespace
             else if (checks && ply < 2 * rootDepth)
                 extension = 1;
 
-            if (!movegen::is_legal(pos, m, legality))
-                continue;
             pos.do_move(m, true);
 
             moveStack[ply + 1] = m;
