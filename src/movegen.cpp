@@ -19,6 +19,7 @@ namespace
     std::array<Bitboard, SQUARE_NB> kingAttacks;
     std::array<std::array<Bitboard, SQUARE_NB>, COLOR_NB> pawnAttacks;
 
+    // Magic bitboard lookup data for one square
     struct Magic
     {
         Bitboard mask;
@@ -71,6 +72,7 @@ namespace
         0x680182A890100882ULL, 0x8E0B8081CC3E2025ULL, 0xD8000E0204420800ULL, 0x41104A0009420A0CULL,
         0x0021414A106A0208ULL, 0x0C44940821082180ULL, 0x4004E00875411C02ULL, 0xD088600C9A00C705ULL};
 
+    // Slow ray walk used only to fill the magic tables
     Bitboard slidingAttack(int sq, Bitboard occ, const int *df, const int *dr)
     {
         Bitboard attacks = 0;
@@ -107,6 +109,7 @@ namespace
         return slidingAttack(sq, occ, df, dr);
     }
 
+    // Fills the knight and king and pawn attack tables
     void initLeapers()
     {
         for (int s = 0; s < SQUARE_NB; ++s)
@@ -160,6 +163,7 @@ namespace
         }
     }
 
+    // Fills the attack table of every square for each blocker subset
     void initMagics(Magic *magics, Bitboard *table, [[maybe_unused]] size_t tableSize, const uint64_t *magicNumbers, bool rook)
     {
         size_t offset = 0;
@@ -208,6 +212,7 @@ namespace
         return m.attacks[((occ & m.mask) * m.magic) >> m.shift];
     }
 
+    // Fills the squares strictly between aligned square pairs
     void initBetween()
     {
         for (int a = 0; a < SQUARE_NB; ++a)
@@ -270,6 +275,7 @@ namespace
         return betweenTable[a][b];
     }
 
+    // Checks the king against attacks on the occupancy after the move
     bool kingSafeAfter(const Position &pos, Move move, Square ksq)
     {
         const Color us = pos.sideToMove;
@@ -291,6 +297,7 @@ namespace
                  | (rookAttack(ksq, occ) & theirs & (pos.byType[ROOK] | pos.byType[QUEEN])));
     }
 
+    // Returns own pieces pinned to the king
     Bitboard pinnedPieces(const Position &pos, Square ksq)
     {
         const Color us = pos.sideToMove;
@@ -308,57 +315,7 @@ namespace
         return pinned;
     }
 
-    [[maybe_unused]] void putPiece(Position &pos, Piece p, Square sq)
-    {
-        const Bitboard bit = 1ULL << sq;
-        pos.board[sq] = p;
-        pos.byPiece[p] |= bit;
-        pos.byColor[colorOf(p)] |= bit;
-        pos.byType[typeOf(p)] |= bit;
-    }
-
-    [[maybe_unused]] void removePiece(Position &pos, Square sq)
-    {
-        const Piece p = pos.board[sq];
-        if (p == NO_PIECE)
-            return;
-        const Bitboard notBit = ~(1ULL << sq);
-        pos.board[sq] = NO_PIECE;
-        pos.byPiece[p] &= notBit;
-        pos.byColor[colorOf(p)] &= notBit;
-        pos.byType[typeOf(p)] &= notBit;
-    }
-
-    [[maybe_unused]] void makeMove(Position &pos, Move m)
-    {
-        const Color us = pos.sideToMove;
-        const Color them = static_cast<Color>(us ^ 1);
-        const Square from = m.from();
-        const Square to = m.to();
-
-        const Piece piece = pos.board[from];
-        removePiece(pos, from);
-
-        if (m.isCastling())
-        {
-            // Lift both pieces before placing them, so they can swap squares in Chess960.
-            removePiece(pos, to);
-            putPiece(pos, makePiece(us, KING), castlingKingTo(m));
-            putPiece(pos, makePiece(us, ROOK), castlingRookTo(m));
-            pos.sideToMove = them;
-            return;
-        }
-
-        if (m.isEnPassant())
-            removePiece(pos, static_cast<Square>(to + (us == WHITE ? -8 : 8)));
-        else if (pos.board[to] != NO_PIECE)
-            removePiece(pos, to);
-
-        putPiece(pos, m.isPromotion() ? makePiece(us, m.promoType()) : piece, to);
-
-        pos.sideToMove = them;
-    }
-
+    // Generates pawn pushes and captures and promotions and en passant within target
     void generatePawnMoves(const Position &pos, Bitboard empty, MoveList &list, bool tacticalOnly = false,
                            Bitboard target = ~0ULL)
     {
@@ -458,6 +415,7 @@ namespace
             list.add(Move(ksq, popLsb(targets)));
     }
 
+    // Adds the castling moves that pass every legality check
     void generateCastling(const Position &pos, MoveList &list)
     {
         const Color us = pos.sideToMove;
@@ -548,7 +506,7 @@ bool movegen::squareAttacked(const Position &pos, Square sq, Color by)
     return squareAttackedWith(pos, sq, by, pos.byColor[WHITE] | pos.byColor[BLACK]);
 }
 
-void movegen::generate_pseudo_legal_moves(const Position &pos, MoveList &list)
+void movegen::generatePseudoLegalMoves(const Position &pos, MoveList &list)
 {
     list.clear();
 
@@ -582,7 +540,7 @@ void movegen::generateEvasions(const Position &pos, const Legality &info, MoveLi
     generateKingMoves(pos, list);
 }
 
-void movegen::generate_tactical_moves(const Position &pos, MoveList &list)
+void movegen::generateTacticalMoves(const Position &pos, MoveList &list)
 {
     list.clear();
 
@@ -597,7 +555,7 @@ void movegen::generate_tactical_moves(const Position &pos, MoveList &list)
     generateKingMoves(pos, list, true);
 }
 
-bool movegen::is_legal(const Position &pos, Move move)
+bool movegen::isLegal(const Position &pos, Move move)
 {
     const Color us = pos.sideToMove;
     const Color them = static_cast<Color>(us ^ 1);
@@ -642,7 +600,7 @@ movegen::Legality movegen::legality(const Position &pos)
     return info;
 }
 
-bool movegen::is_legal(const Position &pos, Move move, Legality &info)
+bool movegen::isLegal(const Position &pos, Move move, Legality &info)
 {
     if ((info.safe & (1ULL << move.from())) && !move.isEnPassant())
         return true;

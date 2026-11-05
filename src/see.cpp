@@ -22,6 +22,15 @@ namespace
                (movegen::attacks(BISHOP, to, occ) & (pos.byType[BISHOP] | pos.byType[QUEEN])) |
                (movegen::attacks(ROOK, to, occ) & (pos.byType[ROOK] | pos.byType[QUEEN]));
     }
+
+    // Returns the cheapest piece type among the attackers
+    int leastValuableAttacker(const Position &pos, Bitboard attackers)
+    {
+        for (int t = PAWN; t <= static_cast<int>(KING); ++t)
+            if (attackers & pos.byType[t])
+                return t;
+        return PAWN;
+    }
 }
 
 int see::evaluate(const Position &pos, Move m)
@@ -62,15 +71,7 @@ int see::evaluate(const Position &pos, Move m)
             break;
 
         // Take with the least valuable attacker first.
-        int pt = PAWN;
-        for (int t = PAWN; t <= static_cast<int>(KING); ++t)
-        {
-            if (sideAttackers & pos.byType[t])
-            {
-                pt = t;
-                break;
-            }
-        }
+        const int pt = leastValuableAttacker(pos, sideAttackers);
 
         const Square atkSq = lsb(sideAttackers & pos.byType[pt]);
         attackers &= ~(1ULL << atkSq);
@@ -136,15 +137,7 @@ bool see::ge(const Position &pos, Move m, int threshold)
 
         res ^= 1;
 
-        int pt = PAWN;
-        for (int t = PAWN; t <= static_cast<int>(KING); ++t)
-        {
-            if (stmAttackers & pos.byType[t])
-            {
-                pt = t;
-                break;
-            }
-        }
+        const int pt = leastValuableAttacker(pos, stmAttackers);
 
         const Square atkSq = lsb(stmAttackers & pos.byType[pt]);
 

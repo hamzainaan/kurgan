@@ -27,6 +27,88 @@ namespace
     {
         return whole == 0 ? 0.0 : 100.0 * static_cast<double>(part) / static_cast<double>(whole);
     }
+
+    // Sums the counters of every record
+    stats::Tally merged(const std::vector<Record> &entries)
+    {
+        stats::Tally t;
+        for (const Record &r : entries)
+        {
+            const stats::Tally &s = r.tally;
+            t.nodes += s.nodes;
+            t.qnodes += s.qnodes;
+            t.ttProbes += s.ttProbes;
+            t.ttHits += s.ttHits;
+            t.ttExact += s.ttExact;
+            t.ttCutoffs += s.ttCutoffs;
+            t.ttCollisions += s.ttCollisions;
+            t.ttStoresExact += s.ttStoresExact;
+            t.ttStoresLower += s.ttStoresLower;
+            t.ttStoresUpper += s.ttStoresUpper;
+            t.listNodes += s.listNodes;
+            t.cutNodes += s.cutNodes;
+            t.ttMoveCutoffs += s.ttMoveCutoffs;
+            t.firstCutoffs += s.firstCutoffs;
+            t.earlyCutoffs += s.earlyCutoffs;
+            t.movesSearched += s.movesSearched;
+            t.lmrCount += s.lmrCount;
+            t.lmrReduction += s.lmrReduction;
+            t.lmrFailHigh += s.lmrFailHigh;
+            t.lmrResearch += s.lmrResearch;
+            t.lmrVerified += s.lmrVerified;
+            t.lmrRefuted += s.lmrRefuted;
+            t.lmrResearchNodes += s.lmrResearchNodes;
+            t.iidCount += s.iidCount;
+            t.nmpEligible += s.nmpEligible;
+            t.nmpCutoffs += s.nmpCutoffs;
+            t.rfpCutoffs += s.rfpCutoffs;
+            t.razorCutoffs += s.razorCutoffs;
+            t.probcutEligible += s.probcutEligible;
+            t.probcutCutoffs += s.probcutCutoffs;
+            t.lmpPruned += s.lmpPruned;
+            t.futilityPruned += s.futilityPruned;
+            t.seeQuietPruned += s.seeQuietPruned;
+            t.seeRejects += s.seeRejects;
+            t.qsearchCutoffs += s.qsearchCutoffs;
+            t.standPatCutoffs += s.standPatCutoffs;
+            t.evalCalls += s.evalCalls;
+            t.evalRebuilds += s.evalRebuilds;
+            t.evalRefills += s.evalRefills;
+            t.evalUpdates += s.evalUpdates;
+        }
+        return t;
+    }
+
+    // Appends one line per worker
+    void appendWorkerSummary(std::ostringstream &out, const std::vector<Record> &entries)
+    {
+        struct WorkerSummary
+        {
+            uint64_t nodes = 0;
+            uint64_t qnodes = 0;
+            int depth = 0;
+            int completed = 0;
+            int searches = 0;
+        };
+
+        std::map<int, WorkerSummary> perWorker;
+        for (const Record &r : entries)
+        {
+            WorkerSummary &w = perWorker[r.worker];
+            w.nodes += r.tally.nodes;
+            w.qnodes += r.tally.qnodes;
+            w.depth = std::max(w.depth, r.depth);
+            w.completed = std::max(w.completed, r.completed);
+            ++w.searches;
+        }
+
+        for (const auto &[worker, w] : perWorker)
+            out << "SMP        worker " << worker
+                << "  searches " << w.searches
+                << "  nodes " << w.nodes << " (qsearch " << w.qnodes << ")"
+                << "  seldepth " << w.depth
+                << "  completed depth " << w.completed << "\n";
+    }
 }
 
 stats::Tally &stats::current()
@@ -67,52 +149,7 @@ std::string stats::report()
     if (local.empty())
         return "";
 
-    Tally t;
-    for (const Record &r : local)
-    {
-        const Tally &s = r.tally;
-        t.nodes += s.nodes;
-        t.qnodes += s.qnodes;
-        t.ttProbes += s.ttProbes;
-        t.ttHits += s.ttHits;
-        t.ttExact += s.ttExact;
-        t.ttCutoffs += s.ttCutoffs;
-        t.ttCollisions += s.ttCollisions;
-        t.ttStoresExact += s.ttStoresExact;
-        t.ttStoresLower += s.ttStoresLower;
-        t.ttStoresUpper += s.ttStoresUpper;
-        t.listNodes += s.listNodes;
-        t.cutNodes += s.cutNodes;
-        t.ttMoveCutoffs += s.ttMoveCutoffs;
-        t.firstCutoffs += s.firstCutoffs;
-        t.earlyCutoffs += s.earlyCutoffs;
-        t.movesSearched += s.movesSearched;
-        t.lmrCount += s.lmrCount;
-        t.lmrReduction += s.lmrReduction;
-        t.lmrFailHigh += s.lmrFailHigh;
-        t.lmrResearch += s.lmrResearch;
-        t.lmrVerified += s.lmrVerified;
-        t.lmrRefuted += s.lmrRefuted;
-        t.lmrResearchNodes += s.lmrResearchNodes;
-        t.iidCount += s.iidCount;
-        t.iidNodes += s.iidNodes;
-        t.nmpEligible += s.nmpEligible;
-        t.nmpCutoffs += s.nmpCutoffs;
-        t.rfpCutoffs += s.rfpCutoffs;
-        t.razorCutoffs += s.razorCutoffs;
-        t.probcutEligible += s.probcutEligible;
-        t.probcutCutoffs += s.probcutCutoffs;
-        t.lmpPruned += s.lmpPruned;
-        t.futilityPruned += s.futilityPruned;
-        t.seeQuietPruned += s.seeQuietPruned;
-        t.seeRejects += s.seeRejects;
-        t.qsearchCutoffs += s.qsearchCutoffs;
-        t.standPatCutoffs += s.standPatCutoffs;
-        t.evalCalls += s.evalCalls;
-        t.evalRebuilds += s.evalRebuilds;
-        t.evalRefills += s.evalRefills;
-        t.evalUpdates += s.evalUpdates;
-    }
+    const Tally t = merged(local);
 
     std::ostringstream out;
     out.setf(std::ios::fixed);
@@ -150,8 +187,7 @@ std::string stats::report()
         << "  refuted " << t.lmrRefuted << " (" << percent(t.lmrRefuted, t.lmrResearch) << "%)"
         << "  re-search nodes " << t.lmrResearchNodes << " (" << percent(t.lmrResearchNodes, t.nodes) << "% of all)\n";
 
-    out << "IID        count " << t.iidCount
-        << "  nodes " << t.iidNodes << " (" << percent(t.iidNodes, t.nodes) << "% of all)\n";
+    out << "IID        count " << t.iidCount << "\n";
 
     // The last three pruning counters count pruned moves rather than nodes.
     out << "pruning    nmp " << t.nmpCutoffs << " (elig " << t.nmpEligible << ")"
@@ -174,33 +210,7 @@ std::string stats::report()
         << "  cached refills " << t.evalRefills
         << "  incremental updates " << t.evalUpdates << "\n";
 
-    struct WorkerSummary
-    {
-        uint64_t nodes = 0;
-        uint64_t qnodes = 0;
-        int depth = 0;
-        int completed = 0;
-        int searches = 0;
-    };
-
-    std::map<int, WorkerSummary> perWorker;
-    for (const Record &r : local)
-    {
-        WorkerSummary &w = perWorker[r.worker];
-        w.nodes += r.tally.nodes;
-        w.qnodes += r.tally.qnodes;
-        w.depth = std::max(w.depth, r.depth);
-        w.completed = std::max(w.completed, r.completed);
-        ++w.searches;
-    }
-
-    for (const auto &[worker, w] : perWorker)
-        out << "SMP        worker " << worker
-            << "  searches " << w.searches
-            << "  nodes " << w.nodes << " (qsearch " << w.qnodes << ")"
-            << "  seldepth " << w.depth
-            << "  completed depth " << w.completed << "\n";
-
+    appendWorkerSummary(out, local);
     return out.str();
 }
 

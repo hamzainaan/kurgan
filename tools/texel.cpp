@@ -97,7 +97,7 @@ namespace
         {
             terms.clear();
             double base = 0.0;
-            if (pos.set_fen(samples[i].fen))
+            if (pos.setFen(samples[i].fen))
             {
                 base = whiteEval(pos);
                 for (size_t j = 0; j < slots.size(); ++j)
@@ -223,7 +223,7 @@ namespace
         std::vector<double> evals(samples.size(), 0.0);
         Position pos;
         for (size_t i = 0; i < samples.size(); ++i)
-            if (pos.set_fen(samples[i].fen))
+            if (pos.setFen(samples[i].fen))
                 evals[i] = whiteEval(pos);
         return evals;
     }

@@ -60,6 +60,7 @@ namespace
         return RANK_1_BB << (8 * rank);
     }
 
+    // Maps a square to its piece square table index for the given side
     int pstIndex(Square sq, Color c)
     {
         const int file = sq & 7;
@@ -72,6 +73,7 @@ namespace
         return rank ^ (7 * c);
     }
 
+    // Returns every rank in front of the given rank for that color
     Bitboard ranksAhead(Color c, int rank)
     {
         Bitboard m = 0;
@@ -86,6 +88,7 @@ namespace
         return m;
     }
 
+    // Returns pawns with no enemy pawn ahead on their own or adjacent files
     Bitboard passedPawnsOf(const Position &pos, Color c)
     {
         const Color them = static_cast<Color>(c ^ 1);
@@ -158,6 +161,7 @@ namespace
     // king safety.
     constexpr int MAX_ATTACK_PIECES = 20;
 
+    // Attack maps built once per evaluation and shared by the terms
     struct AttackInfo
     {
         struct Entry
@@ -187,6 +191,7 @@ namespace
                             : (((pawns >> 7) & NOT_FILE_A) | ((pawns >> 9) & NOT_FILE_H));
     }
 
+    // Scores mobility and records the attacks of every piece
     void mobilityScore(const Position &pos, Color c, Bitboard occ, int &mg, int &eg, AttackInfo &ai)
     {
         const Bitboard notOwn = ~pos.byColor[c];
@@ -350,6 +355,7 @@ namespace
         eg -= tuned::EG_ISOLATED * isolated + tuned::EG_DOUBLED * doubled;
     }
 
+    // Scores passed pawns by how freely they can advance
     void passerRaceScore(const Position &pos, const AttackInfo &ai, Bitboard occ,
                          const Bitboard passed[COLOR_NB], Color c, int &mg, int &eg)
     {
@@ -558,6 +564,7 @@ namespace
         }
     }
 
+    // Scores each own piece type against each weaker enemy piece type
     void imbalanceScore(const int counts[COLOR_NB][PIECE_TYPE_NB], Color us, int &mg, int &eg)
     {
         const Color them = static_cast<Color>(us ^ 1);
@@ -583,6 +590,7 @@ namespace
         }
     }
 
+    // Scores the pawn shield and enemy pawn storms around the king
     void kingPawnScore(const Position &pos, Color c, int &ks)
     {
         const Color them = static_cast<Color>(c ^ 1);
@@ -625,6 +633,7 @@ namespace
         }
     }
 
+    // Scores pawn chains pointing at the king zone
     int attackerBishopFactor(const AttackInfo &ai, Color attacker, Bitboard zone, Bitboard diagonal)
     {
         const int c = popCount(diagonal);
@@ -750,6 +759,35 @@ namespace
         const int quadratic = pts * pts / tuned::KS_ARRAY_FACTOR;
         return (quadratic > tuned::KS_MAX ? tuned::KS_MAX : quadratic) + kingPressure;
     }
+
+    // Adds material and piece square values
+    void materialScore(const Position &pos, Color c, int &mg, int &eg)
+    {
+        for (int pt = PAWN; pt <= KING; ++pt)
+        {
+            Bitboard b = pos.byColor[c] & pos.byType[pt];
+            while (b)
+            {
+                const Square sq = popLsb(b);
+                const int idx = pstIndex(sq, c);
+                mg += tuned::MATERIAL[pt] + tuned::MG_PST[pt][idx];
+                eg += tuned::MATERIAL[pt] + tuned::EG_PST[pt][idx];
+            }
+        }
+    }
+
+    // Combines king shelter and attack danger and castling rights
+    int kingSafetyScore(const Position &pos, const AttackInfo &ai, Bitboard occ,
+                        const int counts[COLOR_NB][PIECE_TYPE_NB], Color c)
+    {
+        const uint8_t rights = static_cast<uint8_t>(c == WHITE ? (WHITE_OO | WHITE_OOO) : (BLACK_OO | BLACK_OOO));
+        int ks = 0;
+        kingPawnScore(pos, c, ks);
+        ks -= kingAttackScore(pos, ai, occ, counts, static_cast<Color>(c ^ 1), ks)
+            * tuned::KS_ATTACK_SCALE / 100;
+        ks += tuned::CASTLING_RIGHTS_VALUE[popCount(static_cast<Bitboard>(pos.castlingRights & rights))];
+        return ks * tuned::KS_SCALE / 100;
+    }
 }
 
 int evaluate::hce(const Position &pos)
@@ -760,19 +798,7 @@ int evaluate::hce(const Position &pos)
     int eg[COLOR_NB] = {0, 0};
 
     for (int c = WHITE; c <= BLACK; ++c)
-    {
-        for (int pt = PAWN; pt <= KING; ++pt)
-        {
-            Bitboard b = pos.byColor[c] & pos.byType[pt];
-            while (b)
-            {
-                const Square sq = popLsb(b);
-                const int idx = pstIndex(sq, static_cast<Color>(c));
-                mg[c] += tuned::MATERIAL[pt] + tuned::MG_PST[pt][idx];
-                eg[c] += tuned::MATERIAL[pt] + tuned::EG_PST[pt][idx];
-            }
-        }
-    }
+        materialScore(pos, static_cast<Color>(c), mg[c], eg[c]);
 
     const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
 
@@ -812,17 +838,7 @@ int evaluate::hce(const Position &pos)
     }
 
     for (int c = WHITE; c <= BLACK; ++c)
-    {
-        const Color color = static_cast<Color>(c);
-        const uint8_t rights = static_cast<uint8_t>(color == WHITE ? (WHITE_OO | WHITE_OOO) : (BLACK_OO | BLACK_OOO));
-        int ks = 0;
-        kingPawnScore(pos, color, ks);
-        ks -= kingAttackScore(pos, ai, occ, counts, static_cast<Color>(c ^ 1), ks)
-            * tuned::KS_ATTACK_SCALE / 100;
-        ks += tuned::CASTLING_RIGHTS_VALUE[popCount(static_cast<Bitboard>(pos.castlingRights & rights))];
-        ks = ks * tuned::KS_SCALE / 100;
-        mg[c] += ks;
-    }
+        mg[c] += kingSafetyScore(pos, ai, occ, counts, static_cast<Color>(c));
 
     // Game phase runs from 0 in the endgame to 24 in the middlegame.
     int phase = popCount(pos.byType[KNIGHT] | pos.byType[BISHOP]) + 2 * popCount(pos.byType[ROOK]) + 4 * popCount(pos.byType[QUEEN]);
@@ -841,6 +857,7 @@ int evaluate::hce(const Position &pos)
 
 namespace
 {
+    // Uses NNUE when it is active and the hand crafted evaluation otherwise
     int baseEvaluate(const Position &pos)
     {
 #ifdef KURGAN_NNUE

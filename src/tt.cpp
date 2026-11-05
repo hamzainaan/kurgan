@@ -26,7 +26,7 @@ namespace
     size_t tableBytes = 0;
     uint64_t clusterMask = 0;
     int generation = 0;
-    uint64_t keySalt = 0;
+    uint64_t keySalt = 0; // Salt mixed into stored keys so a clear needs no memory pass
     uint64_t saltState = 0;
 
     constexpr int CLEAR_GENERATION_STEP = 32;
@@ -39,6 +39,7 @@ namespace
         return splitMix64(saltState);
     }
 
+    // Allocates zeroed memory aligned for huge pages
     void *allocateZeroed(size_t bytes)
     {
 #if defined(_WIN32)
@@ -85,6 +86,7 @@ namespace
                && (e.key != stored || bound != tt::BOUND_EXACT);
     }
 
+    // Writes an entry and counts the store by bound
     void save(tt::Entry &e, uint64_t stored, Move move, int score, int depth, int bound, int ply, int eval, bool pv)
     {
         if (bound == tt::BOUND_EXACT)

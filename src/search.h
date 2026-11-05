@@ -38,6 +38,7 @@ namespace search
     // Runs a blocking search from the root position.
     void go(const Position &root, const SearchLimits &limits);
 
+    // Asks the running search to stop
     void stop();
 
     // Establishes handshake state before the search thread starts, so a
@@ -53,10 +54,12 @@ namespace search
     // Continues a pondered search with the real clock.
     void ponderhit();
 
+    // Results of the last search
     Move bestMove();
     int bestScore();
     uint64_t totalNodes();
 
+    // Bounds of the UCI options
     constexpr int HASH_MIN = 1;
     constexpr int HASH_MAX = 65536;
     constexpr int THREADS_MIN = 1;
@@ -77,11 +80,10 @@ namespace search
     void setContempt(int value);
     void setAnalyseMode(bool enabled);
     void setShowRefutations(bool enabled);
-    void setPonder(bool enabled);
     void setMoveOverhead(int ms);
     int hashSize();
     int threadCount();
-    int maxThreadCount();
+    int maxThreadCount(); // Returns the number of hardware threads
     int threadSetting();
 
     // Suppresses all search output.

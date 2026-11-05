@@ -156,6 +156,7 @@ constexpr Square msb(Bitboard b)
     return static_cast<Square>(63 - std::countl_zero(b));
 }
 
+// Removes and returns the lowest set square
 inline Square popLsb(Bitboard &b)
 {
     const Square s = lsb(b);

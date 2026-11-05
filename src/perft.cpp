@@ -7,6 +7,7 @@
 
 namespace
 {
+    // Known leaf counts by depth up to maxDepth
     struct TestCase
     {
         const char *fen;
@@ -72,6 +73,15 @@ namespace
          {1, 26, 568, 13744, 314346, 0, 0},
          true},
     };
+
+    // Generates evasions in check and every pseudo legal move otherwise
+    void generateMoves(const Position &pos, const movegen::Legality &legality, MoveList &list)
+    {
+        if (legality.checkers)
+            movegen::generateEvasions(pos, legality, list);
+        else
+            movegen::generatePseudoLegalMoves(pos, list);
+    }
 }
 
 uint64_t perft::nodes(Position &pos, int depth)
@@ -81,20 +91,17 @@ uint64_t perft::nodes(Position &pos, int depth)
 
     movegen::Legality legality = movegen::legality(pos);
     MoveList list;
-    if (legality.checkers)
-        movegen::generateEvasions(pos, legality, list);
-    else
-        movegen::generate_pseudo_legal_moves(pos, list);
+    generateMoves(pos, legality, list);
 
     uint64_t n = 0;
     for (int i = 0; i < list.size; ++i)
     {
         const Move m = list.moves[i];
-        if (!movegen::is_legal(pos, m, legality))
+        if (!movegen::isLegal(pos, m, legality))
             continue;
-        pos.do_move(m, true);
+        pos.doMove(m, true);
         n += nodes(pos, depth - 1);
-        pos.undo_move(m);
+        pos.undoMove(m);
     }
     return n;
 }
@@ -106,21 +113,18 @@ void perft::divide(Position &pos, int depth)
 
     movegen::Legality legality = movegen::legality(pos);
     MoveList list;
-    if (legality.checkers)
-        movegen::generateEvasions(pos, legality, list);
-    else
-        movegen::generate_pseudo_legal_moves(pos, list);
+    generateMoves(pos, legality, list);
 
     uint64_t total = 0;
     for (int i = 0; i < list.size; ++i)
     {
         const Move m = list.moves[i];
-        if (!movegen::is_legal(pos, m, legality))
+        if (!movegen::isLegal(pos, m, legality))
             continue;
-        pos.do_move(m, true);
+        pos.doMove(m, true);
 
         const uint64_t n = nodes(pos, depth - 1);
-        pos.undo_move(m);
+        pos.undoMove(m);
 
         total += n;
         std::cout << moveToUci(m) << ": " << n << std::endl;
@@ -137,7 +141,7 @@ bool perft::suite()
     for (size_t i = 0; i < sizeof(SUITE) / sizeof(SUITE[0]); ++i)
     {
         Position pos;
-        pos.set_fen(SUITE[i].fen);
+        pos.setFen(SUITE[i].fen);
 
         for (int depth = 1; depth <= SUITE[i].maxDepth; ++depth)
         {

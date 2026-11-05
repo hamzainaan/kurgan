@@ -22,9 +22,11 @@
 
 namespace
 {
+    // Score bound and search size limits
     constexpr int INF = 32000;
     constexpr int MAX_PLY = 256;
     constexpr int MAX_DEPTH = 128;
+    // Root depths up to this search without forward pruning
     constexpr int FULL_WIDTH_DEPTH = 3;
 
     // Search parameters exposed as UCI spin options.
@@ -88,9 +90,11 @@ namespace
 
     constexpr int MATE = tt::MATE;
     constexpr int MATE_THRESHOLD = tt::MATE_THRESHOLD;
+    // Internal pawn value used to convert scores to UCI centipawns
     constexpr int INTERNAL_PAWN = tuned::MATERIAL[PAWN];
     constexpr int UCI_PAWN = 100;
 
+    // Draw scores are jittered by this much and reported as zero
     constexpr int DRAW_JITTER = 1;
 
     int toCentipawns(int score)
@@ -103,6 +107,7 @@ namespace
                            : -((-scaled + INTERNAL_PAWN / 2) / INTERNAL_PAWN);
     }
 
+    // Known wins are reported as this fixed centipawn score
     constexpr int KNOWN_WIN_CP = 2000;
     constexpr int BOUND_NONE = tt::BOUND_NONE;
     constexpr int BOUND_EXACT = tt::BOUND_EXACT;
@@ -127,7 +132,6 @@ namespace
     int contemptSetting = 0;
     bool analyseMode = false;
     bool showRefutations = false;
-    bool ponderSetting = false;
     int64_t nodesLimit = 0;
     int mateGoal = 0;
     Color activeUs = WHITE;
@@ -154,6 +158,7 @@ namespace
     thread_local int history[COLOR_NB][SQUARE_NB][SQUARE_NB];
     thread_local int captureHistory[PIECE_NB][SQUARE_NB][PIECE_TYPE_NB];
 
+    // Continuation history follows the moves one two four and six plies back
     constexpr int CONT_PLIES = 4;
     constexpr int CONT_DISTANCE[CONT_PLIES] = {1, 2, 4, 6};
     constexpr int CONT_WEIGHT[CONT_PLIES] = {2, 2, 1, 1};
@@ -165,6 +170,7 @@ namespace
     constexpr size_t CONT_ENTRIES = static_cast<size_t>(CONT_PLIES) * PIECE_TO_NB * PIECE_TO_NB;
     constexpr size_t PAWN_ENTRIES = static_cast<size_t>(PAWN_HISTORY_NB) * PIECE_TO_NB;
     constexpr size_t COUNTER_ENTRIES = static_cast<size_t>(COLOR_NB) * SQUARE_NB * SQUARE_NB;
+    // Static evaluation correction tables keyed by pawn and non pawn structure
     constexpr int CORR_NB = 16384;
     constexpr int CORR_LIMIT = 1024;
     constexpr int CORR_DIV = 14;
@@ -196,7 +202,7 @@ namespace
     thread_local int partialScore = 0;
     thread_local bool partialLowerBound = false;
     thread_local int rootBestScore = 0;
-    int lmrTable[MAX_DEPTH][64];
+    int lmrTable[MAX_DEPTH][64]; // Late move reductions by depth and move number
 
     // Helper threads skip depths in staggered patterns to diversify the search.
     constexpr int SKIP_PATTERNS = 20;
@@ -246,6 +252,7 @@ namespace
         return false;
     }
 
+    // Returns the contempt adjusted draw score for the side to move
     int drawScore(const Position &pos)
     {
         const int contempt = analyseMode ? 0 : contemptSetting;
@@ -288,6 +295,7 @@ namespace
                                : pos.board[m.to()];
     }
 
+    // Checks whether a move gives direct or discovered check
     bool givesCheck(const Position &pos, Move m)
     {
         const Color us = pos.sideToMove;
@@ -321,6 +329,7 @@ namespace
                (movegen::attacks(ROOK, ksq, occ) & ours & (pos.byType[ROOK] | pos.byType[QUEEN])) != 0;
     }
 
+    // Checking squares and discovered check candidates cached per node
     struct CheckInfo
     {
         bool ready = false;
@@ -374,6 +383,7 @@ namespace
     {
         return captureHistory[pos.board[m.from()]][m.to()][typeOf(victimOf(pos, m))];
     }
+    // Orders captures by victim value and capture history
     int captureScore(const Position &pos, Move m)
     {
         int score = pieceValue(typeOf(victimOf(pos, m))) * 32 + captureHistoryEntry(pos, m) / 16;
@@ -385,6 +395,7 @@ namespace
     // History values stay within plus or minus HISTORY_MAX.
     constexpr int HISTORY_MAX = 16384;
 
+    // Gravity update that keeps history values bounded
     void updateHistory(int &h, int bonus)
     {
         bonus = std::clamp(bonus, -HISTORY_MAX, HISTORY_MAX);
@@ -451,6 +462,7 @@ namespace
             std::fill(slice.begin(), slice.end(), 0);
     }
 
+    // Counter move slot for the reply to the previous move
     Move &counterMoveEntry(Color c, Move prev)
     {
         return counterMoves[(static_cast<size_t>(c) * SQUARE_NB + prev.from()) * SQUARE_NB + moveTarget(prev)];
@@ -477,6 +489,7 @@ namespace
         return nonPawnCorr[(static_cast<size_t>(c) * COLOR_NB + pos.sideToMove) * CORR_NB + (pos.nonPawnKey[c] & (CORR_NB - 1))];
     }
 
+    // Applies the correction history to a raw evaluation
     int correctedEval(const Position &pos, int raw)
     {
         const int corr = pawnCorrEntry(pos) + nonPawnCorrEntry(pos, WHITE) + nonPawnCorrEntry(pos, BLACK);
@@ -490,6 +503,7 @@ namespace
         h = static_cast<int16_t>(std::clamp(value, -CORR_LIMIT, CORR_LIMIT));
     }
 
+    // Moves the corrections toward the gap between search score and evaluation
     void updateCorrections(const Position &pos, int diff, int depth)
     {
         const int bonus = std::clamp(diff * depth / 8, -CORR_LIMIT / 4, CORR_LIMIT / 4);
@@ -498,6 +512,7 @@ namespace
         updateCorrection(nonPawnCorrEntry(pos, BLACK), bonus);
     }
 
+    // Points the continuation rows of this ply at the earlier moves
     void setContinuationRows(const Position &pos, int ply)
     {
         movedPieceStack[ply] = moveStack[ply] == Move() ? NO_PIECE : pos.board[moveTarget(moveStack[ply])];
@@ -516,6 +531,7 @@ namespace
 
     constexpr int16_t EMPTY_CONT_ROW[PIECE_TO_NB] = {};
 
+    // Combined quiet move history used for ordering and pruning
     struct QuietHistory
     {
         const int (*mainRows)[SQUARE_NB];
@@ -552,11 +568,11 @@ namespace
     {
         int score;
         Move move;
-        uint16_t order; // Generation index used as a stable tie-break.
         int history;
         int64_t rank;
     };
 
+    // One MultiPV line of a finished root search
     struct RootLine
     {
         Move move{};
@@ -566,12 +582,13 @@ namespace
         Move pv[MAX_PLY]{};
     };
 
-    constexpr int TT_MOVE_SCORE = 10000000;
+    // Move ordering bands from good captures down to quiet history
     constexpr int CAPTURE_BAND = 6000000;
     constexpr int KILLER1_SCORE = 5000000;
     constexpr int KILLER2_SCORE = 4900000;
     constexpr int COUNTERMOVE_SCORE = 4800000;
 
+    // Staged move picker that yields tactical moves before quiets
     struct MovePicker
     {
         ScoredMove moves[MoveList::MAX_MOVES];
@@ -659,7 +676,7 @@ namespace
                     value = h;
 
                 const int64_t rank = static_cast<int64_t>(value) * 65536 + (65535 - i);
-                moves[count] = {value, m, static_cast<uint16_t>(i), h, rank};
+                moves[count] = {value, m, h, rank};
                 ++count;
             }
         }
@@ -678,6 +695,7 @@ namespace
                 std::swap(moves[index], moves[best]);
         }
 
+        // Drops the remaining quiets and returns how many legal ones were skipped
         int skipQuiets(const Position &pos, Move excluded, movegen::Legality &legality)
         {
             int dropped = 0;
@@ -689,7 +707,7 @@ namespace
                 {
                     const Move m = list.moves[i];
                     if (m != ttMove && m != excluded && !movegen::isTactical(pos, m)
-                        && movegen::is_legal(pos, m, legality))
+                        && movegen::isLegal(pos, m, legality))
                         ++dropped;
                 }
             }
@@ -699,7 +717,7 @@ namespace
             {
                 if (movegen::isTactical(pos, moves[j].move))
                     moves[kept++] = moves[j];
-                else if (moves[j].move != excluded && movegen::is_legal(pos, moves[j].move, legality))
+                else if (moves[j].move != excluded && movegen::isLegal(pos, moves[j].move, legality))
                     ++dropped;
             }
             count = kept;
@@ -766,6 +784,7 @@ namespace
         }
     };
 
+    // Root filters for MultiPV lines already searched and for searchmoves
     bool isExcludedRootMove(Move m)
     {
         for (Move x : excludedRootMoves)
@@ -784,6 +803,7 @@ namespace
         return false;
     }
 
+    // Returns the process CPU load in permill since the search started
     int cpuLoadPermill(long long elapsedMs)
     {
         const std::clock_t now = std::clock();
@@ -842,6 +862,7 @@ namespace
         std::cout << std::endl;
     }
 
+    // Prints one info line when output is enabled
     void printInfo(int depth, int score, uint64_t nodeCount, long long elapsedMs, const Move *pv, int pvLen, int mpv = 1)
     {
         if (silentOutput)
@@ -862,7 +883,7 @@ namespace
         MoveList list;
         movegen::generateEvasions(pos, legality, list);
         for (int i = 0; i < list.count(); ++i)
-            if (movegen::is_legal(pos, list[i], legality))
+            if (movegen::isLegal(pos, list[i], legality))
                 return false;
 
         return true;
@@ -872,11 +893,11 @@ namespace
     Move firstLegalMove(const Position &pos)
     {
         MoveList list;
-        movegen::generate_pseudo_legal_moves(pos, list);
+        movegen::generatePseudoLegalMoves(pos, list);
         for (int i = 0; i < list.size; ++i)
         {
             Position next = pos;
-            if (next.do_move(list.moves[i]))
+            if (next.doMove(list.moves[i]))
                 return list.moves[i];
         }
         return Move();
@@ -889,7 +910,7 @@ namespace
         for (Move m : activeLimits.searchmoves)
         {
             Position probe = root;
-            if (probe.do_move(m))
+            if (probe.doMove(m))
                 return m;
         }
         return firstLegalMove(root);
@@ -908,25 +929,24 @@ namespace
         while (n < need)
         {
             const tt::Entry *e = tt::probe(pos.zobristKey);
-            if (e == nullptr || e->move == Move() || !pos.do_move(e->move))
+            if (e == nullptr || e->move == Move() || !pos.doMove(e->move))
                 break;
 
             pvTable[ply][ply + n] = e->move;
             ++n;
         }
 
-
         if (n == need - 1)
         {
             MoveList list;
-            movegen::generate_pseudo_legal_moves(pos, list);
+            movegen::generatePseudoLegalMoves(pos, list);
             movegen::Legality legality = movegen::legality(pos);
             for (int i = 0; i < list.count(); ++i)
             {
                 const Move m = list[i];
-                if (!movegen::is_legal(pos, m, legality))
+                if (!movegen::isLegal(pos, m, legality))
                     continue;
-                pos.do_move(m, true);
+                pos.doMove(m, true);
 
                 if (pos.sideToMove == mated && isCheckmated(pos))
                 {
@@ -936,13 +956,13 @@ namespace
                     break;
                 }
 
-                pos.undo_move(m);
+                pos.undoMove(m);
             }
         }
 
         const bool mate = n == need && pos.sideToMove == mated && isCheckmated(pos);
         while (n > 0)
-            pos.undo_move(pvTable[ply][ply + --n]);
+            pos.undoMove(pvTable[ply][ply + --n]);
 
         if (mate)
             pvLength[ply] = ply + need;
@@ -950,11 +970,63 @@ namespace
         return mate;
     }
 
+    // History bonus that grows with depth up to a cap
     int historyBonus(int depth)
     {
         return std::min(tuned::HIST_BONUS_MUL * depth * depth, tuned::HIST_BONUS_MAX);
     }
 
+    // Rewards the cutoff move and penalizes the moves searched before it
+    void updateCutoffHistories(const Position &pos, Move m, Move prevMove, int depth, int ply, bool quiet,
+                               const Move *searchedQuiets, int searchedQuietCount,
+                               const Move *searchedCaptures, int searchedCaptureCount)
+    {
+        const Color us = pos.sideToMove;
+        const int bonus = historyBonus(depth);
+        if (quiet)
+        {
+            if (prevMove != Move())
+                counterMoveEntry(us, prevMove) = m;
+
+            if (killers[0][ply] != m)
+            {
+                killers[1][ply] = killers[0][ply];
+                killers[0][ply] = m;
+            }
+
+            updateHistory(history[us][m.from()][moveTarget(m)], bonus);
+            for (int k = 0; k < searchedQuietCount - 1; ++k)
+                updateHistory(history[us][searchedQuiets[k].from()][moveTarget(searchedQuiets[k])], -bonus);
+
+            const Piece piece = pos.board[m.from()];
+            const Square to = moveTarget(m);
+            for (int i = 0; i < CONT_PLIES; ++i)
+            {
+                if (contRows[i][ply] == nullptr)
+                    continue;
+                updateHistory(contRows[i][ply][pieceToIndex(piece, to)], bonus);
+                for (int k = 0; k < searchedQuietCount - 1; ++k)
+                {
+                    const Move q = searchedQuiets[k];
+                    updateHistory(contRows[i][ply][pieceToIndex(pos.board[q.from()], moveTarget(q))], -bonus);
+                }
+            }
+
+            updateHistory(pawnHistoryEntry(pos, piece, to), bonus);
+            for (int k = 0; k < searchedQuietCount - 1; ++k)
+            {
+                const Move q = searchedQuiets[k];
+                updateHistory(pawnHistoryEntry(pos, pos.board[q.from()], moveTarget(q)), -bonus);
+            }
+        }
+        else
+            updateHistory(captureHistoryEntry(pos, m), bonus);
+
+        for (int k = 0; k < searchedCaptureCount - !quiet; ++k)
+            updateHistory(captureHistoryEntry(pos, searchedCaptures[k]), -bonus);
+    }
+
+    // Principal variation search with pruning and extensions
     int alphaBeta(Position &pos, int depth, int alpha, int beta, int ply, bool pvNode, bool cutNode)
     {
         if (depth <= 0)
@@ -1068,6 +1140,7 @@ namespace
 
         if (!pvNode && !inCheck && !mateWindow && !shallowSearch)
         {
+            // Razoring drops into quiescence when the evaluation is far below alpha
             if (depth <= tuned::RAZOR_DEPTH && eval + tuned::RAZOR_MARGIN * depth < alpha)
             {
                 const int razorScore = quiescence(pos, alpha, beta, ply);
@@ -1078,6 +1151,7 @@ namespace
                 }
             }
 
+            // Reverse futility pruning trusts a static evaluation well above beta
             if (!ttPv && depth <= tuned::RFP_DEPTH && eval - tuned::RFP_MARGIN * (depth - improving) >= beta)
             {
                 ++stats::current().rfpCutoffs;
@@ -1085,20 +1159,21 @@ namespace
             }
         }
 
+        // Null move pruning gives the opponent a free move and checks that beta still holds
         const bool nmpGate = !pvNode && !inNullVerification && !inCheck && !mateWindow && excluded == Move() &&
                              prevMove != Move() && depth >= tuned::NMP_MIN_DEPTH && hasNonPawn;
         if (nmpGate)
             ++stats::current().nmpEligible;
         if (nmpGate && eval >= beta && staticEval >= beta)
         {
-            int R = tuned::NMP_BASE + depth / tuned::NMP_DEPTH_DIV +
-                    std::min(2, (eval - beta) / tuned::NMP_EVAL_DIV);
-            R = std::min(R, depth - 1);
+            int nullReduction = tuned::NMP_BASE + depth / tuned::NMP_DEPTH_DIV +
+                                std::min(2, (eval - beta) / tuned::NMP_EVAL_DIV);
+            nullReduction = std::min(nullReduction, depth - 1);
 
             moveStack[ply + 1] = Move();
-            pos.do_null_move();
-            const int nullScore = -alphaBeta(pos, depth - 1 - R, -beta, -beta + 1, ply + 1, false, !cutNode);
-            pos.undo_null_move();
+            pos.doNullMove();
+            const int nullScore = -alphaBeta(pos, depth - 1 - nullReduction, -beta, -beta + 1, ply + 1, false, !cutNode);
+            pos.undoNullMove();
 
             if (stopFlag.load(std::memory_order_relaxed))
                 return 0;
@@ -1110,7 +1185,7 @@ namespace
                 if (depth >= tuned::NMP_VERIFY_DEPTH)
                 {
                     inNullVerification = true;
-                    const int verify = alphaBeta(pos, depth - R, beta - 1, beta, ply, false, false);
+                    const int verify = alphaBeta(pos, depth - nullReduction, beta - 1, beta, ply, false, false);
                     inNullVerification = false;
 
                     if (verify >= beta)
@@ -1135,21 +1210,21 @@ namespace
             ++stats::current().probcutEligible;
 
             MoveList probcutList;
-            movegen::generate_tactical_moves(pos, probcutList);
+            movegen::generateTacticalMoves(pos, probcutList);
 
             for (int i = 0; i < probcutList.size; ++i)
             {
                 const Move m = probcutList.moves[i];
-                if (!see::ge(pos, m, probcutBeta - staticEval) || !movegen::is_legal(pos, m, legality))
+                if (!see::ge(pos, m, probcutBeta - staticEval) || !movegen::isLegal(pos, m, legality))
                     continue;
-                pos.do_move(m, true);
+                pos.doMove(m, true);
 
                 moveStack[ply + 1] = m;
                 int score = -quiescence(pos, -probcutBeta, -probcutBeta + 1, ply + 1);
                 if (score >= probcutBeta)
                     score = -alphaBeta(pos, depth - tuned::PROBCUT_DEPTH + 1, -probcutBeta,
                                        -probcutBeta + 1, ply + 1, false, !cutNode);
-                pos.undo_move(m);
+                pos.undoMove(m);
 
                 if (stopFlag.load(std::memory_order_relaxed))
                     return 0;
@@ -1162,6 +1237,7 @@ namespace
             }
         }
 
+        // Internal iterative reduction searches nodes without a table move one ply shallower
         if ((pvNode || cutNode) && excluded == Move() && ttMove == Move() && depth >= tuned::IIR_DEPTH)
         {
             ++stats::current().iidCount;
@@ -1172,7 +1248,7 @@ namespace
         if (inCheck)
             movegen::generateEvasions(pos, legality, list);
         else
-            movegen::generate_pseudo_legal_moves(pos, list);
+            movegen::generatePseudoLegalMoves(pos, list);
 
         MovePicker picker;
         picker.init(pos, list, ttMove, counter, ply, false);
@@ -1194,7 +1270,7 @@ namespace
         {
             if (m == excluded || (ply == 0 && (!inSearchMoves(m) || isExcludedRootMove(m))))
                 continue;
-            if (!movegen::is_legal(pos, m, legality))
+            if (!movegen::isLegal(pos, m, legality))
                 continue;
 
             const bool quiet = !movegen::isTactical(pos, m);
@@ -1203,6 +1279,7 @@ namespace
 
             const bool canPrune = ply > 0 && !shallowSearch && hasNonPawn && bestScore > -MATE_THRESHOLD;
 
+            // Late move pruning skips the remaining quiets once enough moves were tried
             if (canPrune && quiet && !inCheck && depth <= tuned::LMP_DEPTH &&
                 moveCount > (tuned::LMP_BASE + depth * depth) / (2 - improving))
             {
@@ -1216,6 +1293,7 @@ namespace
 
             if (canPrune)
             {
+                // History and futility and SEE pruning use the depth after the expected reduction
                 const int lmrDepth = std::max(0, depth - 1 - lmrTable[std::min(depth, MAX_DEPTH - 1)][std::min(moveCount, 63)]);
 
                 if (quiet && !checks)
@@ -1257,6 +1335,7 @@ namespace
                 }
             }
 
+            // Singular extension extends a table move that beats every alternative by a margin
             int extension = 0;
             if (ply > 0 && ply < 2 * rootDepth && m == ttMove && excluded == Move() && depth >= tuned::SE_DEPTH &&
                 ttDepth >= depth - 3 && (ttBound == BOUND_LOWER || ttBound == BOUND_EXACT) &&
@@ -1282,7 +1361,7 @@ namespace
             else if (checks && ply < 2 * rootDepth)
                 extension = 1;
 
-            pos.do_move(m, true);
+            pos.doMove(m, true);
 
             moveStack[ply + 1] = m;
             doubleExtensions[ply + 1] = doubleExtensions[ply] + (extension == 2);
@@ -1302,6 +1381,7 @@ namespace
             }
             else
             {
+                // Late move reduction searches later moves shallower and verifies fail highs
                 int r = 0;
                 if (depth >= 3)
                 {
@@ -1344,7 +1424,7 @@ namespace
                     score = -alphaBeta(pos, newDepth, -beta, -alpha, ply + 1, true, false);
             }
 
-            pos.undo_move(m);
+            pos.undoMove(m);
 
             if (stopFlag.load(std::memory_order_relaxed))
                 return 0;
@@ -1386,48 +1466,8 @@ namespace
                         if (ttMove != Move() && m == ttMove)
                             ++stats::current().ttMoveCutoffs;
 
-                        const int bonus = historyBonus(depth);
-                        if (quiet)
-                        {
-                            if (prevMove != Move())
-                                counterMoveEntry(us, prevMove) = m;
-
-                            if (killers[0][ply] != m)
-                            {
-                                killers[1][ply] = killers[0][ply];
-                                killers[0][ply] = m;
-                            }
-
-                            updateHistory(history[us][m.from()][moveTarget(m)], bonus);
-                            for (int k = 0; k < searchedQuietCount - 1; ++k)
-                                updateHistory(history[us][searchedQuiets[k].from()][moveTarget(searchedQuiets[k])], -bonus);
-
-                            const Piece piece = pos.board[m.from()];
-                            const Square to = moveTarget(m);
-                            for (int i = 0; i < CONT_PLIES; ++i)
-                            {
-                                if (contRows[i][ply] == nullptr)
-                                    continue;
-                                updateHistory(contRows[i][ply][pieceToIndex(piece, to)], bonus);
-                                for (int k = 0; k < searchedQuietCount - 1; ++k)
-                                {
-                                    const Move q = searchedQuiets[k];
-                                    updateHistory(contRows[i][ply][pieceToIndex(pos.board[q.from()], moveTarget(q))], -bonus);
-                                }
-                            }
-
-                            updateHistory(pawnHistoryEntry(pos, piece, to), bonus);
-                            for (int k = 0; k < searchedQuietCount - 1; ++k)
-                            {
-                                const Move q = searchedQuiets[k];
-                                updateHistory(pawnHistoryEntry(pos, pos.board[q.from()], moveTarget(q)), -bonus);
-                            }
-                        }
-                        else
-                            updateHistory(captureHistoryEntry(pos, m), bonus);
-
-                        for (int k = 0; k < searchedCaptureCount - !quiet; ++k)
-                            updateHistory(captureHistoryEntry(pos, searchedCaptures[k]), -bonus);
+                        updateCutoffHistories(pos, m, prevMove, depth, ply, quiet, searchedQuiets, searchedQuietCount,
+                                              searchedCaptures, searchedCaptureCount);
                         break;
                     }
                 }
@@ -1465,6 +1505,7 @@ namespace
         return bestScore;
     }
 
+    // Searches tactical moves until the position is quiet
     int quiescence(Position &pos, int alpha, int beta, int ply)
     {
         ++stats::current().qnodes;
@@ -1540,7 +1581,7 @@ namespace
         if (inCheck)
             movegen::generateEvasions(pos, legality, list);
         else
-            movegen::generate_tactical_moves(pos, list);
+            movegen::generateTacticalMoves(pos, list);
 
         setContinuationRows(pos, ply);
 
@@ -1580,14 +1621,14 @@ namespace
             else if (bestScore > -MATE_THRESHOLD && !movegen::isTactical(pos, m))
                 continue;
 
-            if (!movegen::is_legal(pos, m, legality))
+            if (!movegen::isLegal(pos, m, legality))
                 continue;
-            pos.do_move(m, true);
+            pos.doMove(m, true);
 
             moveStack[ply + 1] = m;
             ++legalMoves;
             const int score = -quiescence(pos, -beta, -alpha, ply + 1);
-            pos.undo_move(m);
+            pos.undoMove(m);
 
             if (stopFlag.load(std::memory_order_relaxed))
                 return 0;
@@ -1685,6 +1726,7 @@ namespace
         }
     }
 
+    // Extends a PV with table moves and stops at repetitions
     int extendPVFromTT(Position &pos, Move *pv, int length)
     {
         uint64_t seen[MAX_PLY + 1];
@@ -1696,7 +1738,7 @@ namespace
 
         for (int i = 0; i < length && played < MAX_PLY - 1; ++i)
         {
-            if (!pos.do_move(pv[i]))
+            if (!pos.doMove(pv[i]))
             {
                 complete = false;
                 break;
@@ -1712,7 +1754,7 @@ namespace
                 break;
 
             const Move m = e->move;
-            if (!pos.do_move(m))
+            if (!pos.doMove(m))
                 break;
 
             bool repeated = pos.isRepetition(played + 1);
@@ -1721,7 +1763,7 @@ namespace
                     repeated = true;
             if (repeated)
             {
-                pos.undo_move(m);
+                pos.undoMove(m);
                 break;
             }
 
@@ -1730,11 +1772,12 @@ namespace
         }
 
         for (int i = played - 1; i >= 0; --i)
-            pos.undo_move(pv[i]);
+            pos.undoMove(pv[i]);
 
         return played;
     }
 
+    // Publishes the best line of an interrupted iteration
     void adoptPartialLine(Position &pos, int depth, std::chrono::steady_clock::time_point start)
     {
         Move previousBest;
@@ -1761,6 +1804,7 @@ namespace
         finalPonderMove = partialPvLength > 1 ? partialPv[1] : Move();
     }
 
+    // Holds the bestmove until stop or ponderhit as UCI requires
     void waitForStop()
     {
         if (activeLimits.infinite)
@@ -1778,7 +1822,8 @@ namespace
         }
     }
 
-    void iterativeDeepening(Position &pos)
+    // Clears the per thread tables before a new search
+    void resetWorkerState()
     {
         nodes = 0;
         seldepth = 0;
@@ -1793,6 +1838,28 @@ namespace
         std::memset(pvLength, 0, sizeof(pvLength));
         excludedRootMoves.clear();
         stats::current() = stats::Tally{};
+    }
+
+    // Sorts MultiPV lines by score and keeps ties in search order
+    void sortRootLines(RootLine *lines, int lineCount)
+    {
+        for (int i = 1; i < lineCount; ++i)
+        {
+            const RootLine key = lines[i];
+            int j = i - 1;
+            while (j >= 0 && lines[j].score < key.score)
+            {
+                lines[j + 1] = lines[j];
+                --j;
+            }
+            lines[j + 1] = key;
+        }
+    }
+
+    // Deepens the search one ply at a time and applies the time rules per iteration
+    void iterativeDeepening(Position &pos)
+    {
+        resetWorkerState();
 
         // Checkmate or stalemate at the root leaves nothing to search.
         const bool rootHasLegalMove = firstLegalMove(pos) != Move();
@@ -1895,17 +1962,7 @@ namespace
 
             if (lineCount > 0)
             {
-                for (int i = 1; i < lineCount; ++i)
-                {
-                    const RootLine key = lines[i];
-                    int j = i - 1;
-                    while (j >= 0 && lines[j].score < key.score)
-                    {
-                        lines[j + 1] = lines[j];
-                        --j;
-                    }
-                    lines[j + 1] = key;
-                }
+                sortRootLines(lines, lineCount);
 
                 scoreDrop = previousScore - lines[0].score;
                 previousScore = lines[0].score;
@@ -1990,6 +2047,7 @@ namespace
         waitForStop();
     }
 
+    // Thread entry where the main thread stops the helpers when it finishes
     void worker(Position *pos, int id)
     {
         workerId = id;
@@ -2037,7 +2095,7 @@ void search::prepare(const Position &root, const SearchLimits &limits)
         for (Move requested : activeLimits.searchmoves)
         {
             Position probe = root;
-            if (probe.do_move(requested))
+            if (probe.doMove(requested))
                 usable.push_back(requested);
         }
 
@@ -2256,11 +2314,6 @@ void search::setAnalyseMode(bool enabled)
 void search::setShowRefutations(bool enabled)
 {
     showRefutations = enabled;
-}
-
-void search::setPonder(bool enabled)
-{
-    ponderSetting = enabled;
 }
 
 void search::setMoveOverhead(int ms)

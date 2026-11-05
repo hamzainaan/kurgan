@@ -14,6 +14,7 @@ namespace
     constexpr int DEFAULT_DEPTH = 12;
     constexpr int BENCH_HASH_MB = 64;
 
+    // Fixed positions whose total node count is the bench signature
     constexpr const char *POSITIONS[] = {
         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
@@ -50,7 +51,7 @@ void bench::run(int depth)
     for (int i = 0; i < count; ++i)
     {
         Position pos;
-        pos.set_fen(POSITIONS[i]);
+        pos.setFen(POSITIONS[i]);
 
         search::clear();
 
