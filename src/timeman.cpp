@@ -9,7 +9,7 @@
 #include <bit>
 #include <cmath>
 
-namespace manager
+namespace
 {
     using Clock = std::chrono::steady_clock;
 
@@ -150,6 +150,16 @@ namespace manager
         return count;
     }
 
+    bool extensible(double tactical)
+    {
+        return !singleReply && baseOptimumMs.load(std::memory_order_relaxed) > 0
+               && extensionsUsed.load(std::memory_order_relaxed) < MAX_EXTENSIONS
+               && (tactical >= EXTEND_THRESHOLD || failingLow.load(std::memory_order_relaxed));
+    }
+}
+
+namespace manager
+{
     void analyzeRoot(const Position &root, int searchMoveCount)
     {
         const Color us = root.sideToMove;
@@ -285,13 +295,6 @@ namespace manager
         observedScore = score;
         observedSwing = scoreDrop < 0 ? -scoreDrop : scoreDrop;
         observedStable = stableIterations;
-    }
-
-    bool extensible(double tactical)
-    {
-        return !singleReply && baseOptimumMs.load(std::memory_order_relaxed) > 0
-               && extensionsUsed.load(std::memory_order_relaxed) < MAX_EXTENSIONS
-               && (tactical >= EXTEND_THRESHOLD || failingLow.load(std::memory_order_relaxed));
     }
 
     bool extend()
