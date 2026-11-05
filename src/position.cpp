@@ -284,7 +284,13 @@ bool Position::do_move(Move move, bool knownLegal)
         }
     }
 
-    enPassantSquare = (pt == PAWN && (from ^ to) == 16) ? static_cast<Square>((from + to) / 2) : SQ_NONE;
+    enPassantSquare = SQ_NONE;
+    if (pt == PAWN && (from ^ to) == 16)
+    {
+        const Square passed = static_cast<Square>((from + to) / 2);
+        if (movegen::pawnAttacksFrom(us, passed) & byColor[them] & byType[PAWN])
+            enPassantSquare = passed;
+    }
 
     if (pt == PAWN || undo.capturedPiece != NO_PIECE)
         halfmoveClock = 0;
