@@ -291,6 +291,23 @@ namespace
                  | (rookAttack(ksq, occ) & theirs & (pos.byType[ROOK] | pos.byType[QUEEN])));
     }
 
+    Bitboard pinnedPieces(const Position &pos, Square ksq)
+    {
+        const Color us = pos.sideToMove;
+        const Bitboard theirs = pos.byColor[static_cast<Color>(us ^ 1)];
+        const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
+        Bitboard snipers = (bishopAttack(ksq, 0) & theirs & (pos.byType[BISHOP] | pos.byType[QUEEN]))
+                           | (rookAttack(ksq, 0) & theirs & (pos.byType[ROOK] | pos.byType[QUEEN]));
+        Bitboard pinned = 0;
+        while (snipers)
+        {
+            const Bitboard blockers = betweenTable[ksq][popLsb(snipers)] & occ;
+            if (blockers && !(blockers & (blockers - 1)) && (blockers & pos.byColor[us]))
+                pinned |= blockers;
+        }
+        return pinned;
+    }
+
     [[maybe_unused]] void putPiece(Position &pos, Piece p, Square sq)
     {
         const Bitboard bit = 1ULL << sq;
@@ -573,6 +590,58 @@ bool movegen::is_legal(const Position &pos, Move move)
 
     const Square ksq = pos.kingSquare(us);
     return ksq != SQ_NONE && kingSafeAfter(pos, move, ksq);
+}
+
+movegen::Legality movegen::legality(const Position &pos)
+{
+    Legality info;
+    const Color us = pos.sideToMove;
+    const Color them = static_cast<Color>(us ^ 1);
+    info.king = pos.kingSquare(us);
+    if (info.king == SQ_NONE)
+        return info;
+
+    const Square ksq = info.king;
+    const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
+    const Bitboard theirs = pos.byColor[them];
+    const Bitboard diagonal = theirs & (pos.byType[BISHOP] | pos.byType[QUEEN]);
+    const Bitboard straight = theirs & (pos.byType[ROOK] | pos.byType[QUEEN]);
+
+    info.checkers = (pawnAttacks[us][ksq] & theirs & pos.byType[PAWN])
+                    | (knightAttacks[ksq] & theirs & pos.byType[KNIGHT])
+                    | (kingAttacks[ksq] & theirs & pos.byType[KING])
+                    | (bishopAttack(ksq, occ) & diagonal)
+                    | (rookAttack(ksq, occ) & straight);
+    return info;
+}
+
+bool movegen::is_legal(const Position &pos, Move move, Legality &info)
+{
+    if (move.isCastling())
+        return canCastle(pos, move);
+
+    const Square from = move.from();
+    const Piece piece = pos.board[from];
+    if (piece == NO_PIECE)
+        return false;
+
+    if (typeOf(piece) == KING)
+    {
+        const Bitboard occ = (pos.byColor[WHITE] | pos.byColor[BLACK]) ^ (1ULL << from);
+        return !squareAttackedWith(pos, move.to(), static_cast<Color>(pos.sideToMove ^ 1), occ);
+    }
+
+    if (info.king == SQ_NONE)
+        return false;
+    if (info.checkers || move.isEnPassant())
+        return kingSafeAfter(pos, move, info.king);
+
+    if (!info.pinsReady)
+    {
+        info.pinsReady = true;
+        info.pinned = pinnedPieces(pos, info.king);
+    }
+    return !(info.pinned & (1ULL << from)) || kingSafeAfter(pos, move, info.king);
 }
 
 void movegen::setChess960(bool enabled)

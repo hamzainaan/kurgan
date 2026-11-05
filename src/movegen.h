@@ -122,4 +122,16 @@ namespace movegen
 
     // Checks whether a pseudo-legal move leaves the king out of check.
     bool is_legal(const Position &pos, Move move);
+
+    struct Legality
+    {
+        Square king = SQ_NONE;
+        Bitboard checkers = 0;
+        Bitboard pinned = 0;
+        bool pinsReady = false;
+    };
+
+    Legality legality(const Position &pos);
+
+    bool is_legal(const Position &pos, Move move, Legality &info);
 }

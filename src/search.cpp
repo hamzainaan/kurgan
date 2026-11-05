@@ -858,15 +858,14 @@ namespace
 
     bool isCheckmated(Position &pos)
     {
-        const Color us = pos.sideToMove;
-        const Square ksq = pos.kingSquare(us);
-        if (ksq == SQ_NONE || !movegen::squareAttacked(pos, ksq, static_cast<Color>(us ^ 1)))
+        movegen::Legality legality = movegen::legality(pos);
+        if (!legality.checkers)
             return false;
 
         MoveList list;
         movegen::generate_pseudo_legal_moves(pos, list);
         for (int i = 0; i < list.count(); ++i)
-            if (movegen::is_legal(pos, list[i]))
+            if (movegen::is_legal(pos, list[i], legality))
                 return false;
 
         return true;
@@ -924,11 +923,13 @@ namespace
         {
             MoveList list;
             movegen::generate_pseudo_legal_moves(pos, list);
+            movegen::Legality legality = movegen::legality(pos);
             for (int i = 0; i < list.count(); ++i)
             {
                 const Move m = list[i];
-                if (!movegen::is_legal(pos, m) || !pos.do_move(m))
+                if (!movegen::is_legal(pos, m, legality))
                     continue;
+                pos.do_move(m, true);
 
                 if (pos.sideToMove == mated && isCheckmated(pos))
                 {
@@ -1035,9 +1036,8 @@ namespace
 
         setContinuationRows(pos, ply);
 
-        const Square ksq = pos.kingSquare(us);
-        const bool inCheck = ksq != SQ_NONE &&
-                             movegen::squareAttacked(pos, ksq, static_cast<Color>(us ^ 1));
+        movegen::Legality legality = movegen::legality(pos);
+        const bool inCheck = legality.checkers != 0;
 
         int staticEval;
         int rawEval = NO_EVAL;
@@ -1142,8 +1142,9 @@ namespace
             for (int i = 0; i < probcutList.size; ++i)
             {
                 const Move m = probcutList.moves[i];
-                if (!see::ge(pos, m, probcutBeta - staticEval) || !pos.do_move(m))
+                if (!see::ge(pos, m, probcutBeta - staticEval) || !movegen::is_legal(pos, m, legality))
                     continue;
+                pos.do_move(m, true);
 
                 moveStack[ply + 1] = m;
                 int score = -quiescence(pos, -probcutBeta, -probcutBeta + 1, ply + 1);
@@ -1278,8 +1279,9 @@ namespace
             else if (checks && ply < 2 * rootDepth)
                 extension = 1;
 
-            if (!pos.do_move(m))
+            if (!movegen::is_legal(pos, m, legality))
                 continue;
+            pos.do_move(m, true);
 
             moveStack[ply + 1] = m;
             doubleExtensions[ply + 1] = doubleExtensions[ply] + (extension == 2);
@@ -1481,9 +1483,8 @@ namespace
             seldepth = ply;
 
         const Color us = pos.sideToMove;
-        const Color them = static_cast<Color>(us ^ 1);
-        const Square ksq = pos.kingSquare(us);
-        const bool inCheck = ksq != SQ_NONE && movegen::squareAttacked(pos, ksq, them);
+        movegen::Legality legality = movegen::legality(pos);
+        const bool inCheck = legality.checkers != 0;
         const uint64_t key = pos.zobristKey;
         const int originalAlpha = alpha;
 
@@ -1577,8 +1578,9 @@ namespace
             else if (bestScore > -MATE_THRESHOLD && !movegen::isTactical(pos, m))
                 continue;
 
-            if (!pos.do_move(m))
+            if (!movegen::is_legal(pos, m, legality))
                 continue;
+            pos.do_move(m, true);
 
             moveStack[ply + 1] = m;
             ++legalMoves;
