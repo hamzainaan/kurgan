@@ -1786,6 +1786,23 @@ namespace
         }
     }
 
+    void resetWorkerState()
+    {
+        nodes = 0;
+        seldepth = 0;
+        std::memset(killers, 0, sizeof(killers));
+        std::memset(history, 0, sizeof(history));
+        std::memset(captureHistory, 0, sizeof(captureHistory));
+        acquireHistorySlices();
+        std::fill(moveStack, moveStack + MAX_PLY + 2, Move());
+        std::fill(excludedStack, excludedStack + MAX_PLY + 2, Move());
+        doubleExtensions[0] = 0;
+        std::memset(pvTable, 0, sizeof(pvTable));
+        std::memset(pvLength, 0, sizeof(pvLength));
+        excludedRootMoves.clear();
+        stats::current() = stats::Tally{};
+    }
+
     void sortRootLines(RootLine *lines, int lineCount)
     {
         for (int i = 1; i < lineCount; ++i)
@@ -1803,19 +1820,7 @@ namespace
 
     void iterativeDeepening(Position &pos)
     {
-        nodes = 0;
-        seldepth = 0;
-        std::memset(killers, 0, sizeof(killers));
-        std::memset(history, 0, sizeof(history));
-        std::memset(captureHistory, 0, sizeof(captureHistory));
-        acquireHistorySlices();
-        std::fill(moveStack, moveStack + MAX_PLY + 2, Move());
-        std::fill(excludedStack, excludedStack + MAX_PLY + 2, Move());
-        doubleExtensions[0] = 0;
-        std::memset(pvTable, 0, sizeof(pvTable));
-        std::memset(pvLength, 0, sizeof(pvLength));
-        excludedRootMoves.clear();
-        stats::current() = stats::Tally{};
+        resetWorkerState();
 
         // Checkmate or stalemate at the root leaves nothing to search.
         const bool rootHasLegalMove = firstLegalMove(pos) != Move();
