@@ -44,6 +44,7 @@ namespace
     // Magic of the legacy KNN1 container.
     constexpr uint32_t LEGACY_MAGIC = 0x314E4E4B;
 
+    // Quantised weights of the feature transformer and the output head
     struct Network
     {
         alignas(64) int16_t ft[static_cast<size_t>(nnue::INPUT_SIZE) * nnue::HALF_DIM];
@@ -51,7 +52,7 @@ namespace
         alignas(64) int16_t l2[nnue::OUTPUT_BUCKETS * 2 * nnue::HALF_DIM];
         alignas(64) int16_t l2Bias[nnue::OUTPUT_BUCKETS];
         uint32_t hash = 0;
-        bool narrowHead = false;
+        bool narrowHead = false; // True when every head weight fits the faster 16 bit dot product
     };
 
     Network *network = nullptr;
@@ -59,6 +60,7 @@ namespace
     // Incremented whenever the network changes so cached accumulators go stale.
     uint32_t netGeneration = 1;
 
+    // Hashes the network bytes to identify the loaded net
     uint32_t fnv1a(const void *data, size_t size)
     {
         const uint8_t *bytes = static_cast<const uint8_t *>(data);
@@ -87,6 +89,7 @@ namespace
         return ((sq >> 3) << 2) | (file > 3 ? 7 - file : file);
     }
 
+    // Thin SIMD wrappers for the widest available instruction set
 #if defined(__AVX512BW__)
     using Vec = __m512i;
     inline Vec vload(const int16_t *p) { return _mm512_load_si512(p); }
@@ -195,12 +198,14 @@ namespace
 #endif
     }
 
+    // Clipped square used by the SCReLU activation
     int32_t squareOf(int32_t value)
     {
         const int32_t clamped = value < 0 ? 0 : (value > nnue::QA ? nnue::QA : value);
         return clamped * clamped;
     }
 
+    // Head dot product in 32 bit lanes that stays exact for any weight
 #if defined(__AVX2__)
     int64_t headWide(const int16_t *acc0, const int16_t *acc1, const int16_t *row)
     {
@@ -283,6 +288,7 @@ namespace
 #endif
 
 #if defined(__AVX2__) || defined(__SSE4_1__)
+    // Head dot product in 16 bit lanes for small head weights
     int64_t headNarrow(const int16_t *acc0, const int16_t *acc1, const int16_t *row)
     {
         Vec sum = vzero();
@@ -306,6 +312,7 @@ namespace
         return headWide(acc0, acc1, row);
     }
 
+    // Accumulator cache per king square updated by piece differences
     struct HalfCache
     {
         alignas(64) int16_t values[nnue::HALF_DIM];
@@ -316,6 +323,7 @@ namespace
     thread_local HalfCache halfCaches[COLOR_NB][64];
     thread_local Square lastKing[COLOR_NB] = {SQ_NONE, SQ_NONE};
 
+    // Brings the cached accumulator of one perspective up to date
     const int16_t *refreshHalf(const Position &pos, const Network &net, int colour)
     {
         const Square king = perspectiveKing(pos, colour);
@@ -368,6 +376,7 @@ namespace
         return cache.values;
     }
 
+    // Selects the output bucket from the piece count
     int outputBucket(const Position &pos)
     {
         const int pieces = popCount(pos.byColor[WHITE] | pos.byColor[BLACK]);

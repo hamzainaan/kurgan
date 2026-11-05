@@ -31,6 +31,7 @@ namespace nnue
     constexpr size_t NET_SIZE = static_cast<size_t>(INPUT_SIZE) * HALF_DIM * 2 + HALF_DIM * 2
         + static_cast<size_t>(OUTPUT_BUCKETS) * 2 * HALF_DIM * 2 + OUTPUT_BUCKETS * 2;
 
+    // True when the engine was built with NNUE support
     constexpr bool supported()
     {
 #ifdef KURGAN_NNUE
@@ -40,10 +41,13 @@ namespace nnue
 #endif
     }
 
+    // Loads a headerless network and records the reason on failure
     bool loadFromMemory(const uint8_t *data, size_t size, const std::string &name);
 
+    // Loads the network linked into the binary
     bool loadEmbedded();
 
+    // Frees the network and invalidates cached accumulators
     void unload();
     bool loaded();
 
@@ -57,6 +61,7 @@ namespace nnue
     // Checks whether NNUE is supported, loaded and enabled.
     bool active();
 
+    // Returns the name of the loaded network
     const std::string &file();
 
     // Returns a short identifier of the loaded network, or 0 when none is loaded.
