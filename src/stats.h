@@ -37,7 +37,6 @@ namespace stats
         uint64_t lmrResearchNodes = 0;
 
         uint64_t iidCount = 0;
-        uint64_t iidNodes = 0;
 
         uint64_t nmpEligible = 0; // Nodes that passed the NMP gate.
         uint64_t nmpCutoffs = 0;

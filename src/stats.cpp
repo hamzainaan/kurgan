@@ -59,7 +59,6 @@ namespace
             t.lmrRefuted += s.lmrRefuted;
             t.lmrResearchNodes += s.lmrResearchNodes;
             t.iidCount += s.iidCount;
-            t.iidNodes += s.iidNodes;
             t.nmpEligible += s.nmpEligible;
             t.nmpCutoffs += s.nmpCutoffs;
             t.rfpCutoffs += s.rfpCutoffs;
@@ -188,8 +187,7 @@ std::string stats::report()
         << "  refuted " << t.lmrRefuted << " (" << percent(t.lmrRefuted, t.lmrResearch) << "%)"
         << "  re-search nodes " << t.lmrResearchNodes << " (" << percent(t.lmrResearchNodes, t.nodes) << "% of all)\n";
 
-    out << "IID        count " << t.iidCount
-        << "  nodes " << t.iidNodes << " (" << percent(t.iidNodes, t.nodes) << "% of all)\n";
+    out << "IID        count " << t.iidCount << "\n";
 
     // The last three pruning counters count pruned moves rather than nodes.
     out << "pruning    nmp " << t.nmpCutoffs << " (elig " << t.nmpEligible << ")"
