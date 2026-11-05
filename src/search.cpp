@@ -1786,6 +1786,21 @@ namespace
         }
     }
 
+    void sortRootLines(RootLine *lines, int lineCount)
+    {
+        for (int i = 1; i < lineCount; ++i)
+        {
+            const RootLine key = lines[i];
+            int j = i - 1;
+            while (j >= 0 && lines[j].score < key.score)
+            {
+                lines[j + 1] = lines[j];
+                --j;
+            }
+            lines[j + 1] = key;
+        }
+    }
+
     void iterativeDeepening(Position &pos)
     {
         nodes = 0;
@@ -1903,17 +1918,7 @@ namespace
 
             if (lineCount > 0)
             {
-                for (int i = 1; i < lineCount; ++i)
-                {
-                    const RootLine key = lines[i];
-                    int j = i - 1;
-                    while (j >= 0 && lines[j].score < key.score)
-                    {
-                        lines[j + 1] = lines[j];
-                        --j;
-                    }
-                    lines[j + 1] = key;
-                }
+                sortRootLines(lines, lineCount);
 
                 scoreDrop = previousScore - lines[0].score;
                 previousScore = lines[0].score;
