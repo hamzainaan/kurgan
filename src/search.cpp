@@ -991,7 +991,8 @@ namespace
         const Move prevMove = moveStack[ply];
         const Move counter = prevMove == Move() ? Move() : counterMoveEntry(us, prevMove);
 
-        if (ply > 0 && (pos.halfmoveClock >= 100 || isInsufficientMaterial(pos) || pos.isRepetition(ply)))
+        if (ply > 0 && ((pos.halfmoveClock >= 100 && !isCheckmated(pos)) || isInsufficientMaterial(pos)
+                        || pos.isRepetition(ply)))
             return drawScore(pos) + DRAW_JITTER - static_cast<int>(nodes & 2);
 
         const tt::Entry *tte = excluded == Move() ? tt::probe(key) : nullptr;
@@ -1491,7 +1492,7 @@ namespace
         const Move prevMove = moveStack[ply];
         const Move counter = prevMove == Move() ? Move() : counterMoveEntry(us, prevMove);
 
-        if (pos.halfmoveClock >= 100 || pos.isRepetition(ply) || isInsufficientMaterial(pos))
+        if ((pos.halfmoveClock >= 100 && !isCheckmated(pos)) || pos.isRepetition(ply) || isInsufficientMaterial(pos))
             return drawScore(pos);
 
         const tt::Entry *tte = tt::probe(key);
