@@ -864,7 +864,7 @@ namespace
             return false;
 
         MoveList list;
-        movegen::generate_pseudo_legal_moves(pos, list);
+        movegen::generateEvasions(pos, legality, list);
         for (int i = 0; i < list.count(); ++i)
             if (movegen::is_legal(pos, list[i], legality))
                 return false;
@@ -1172,7 +1172,10 @@ namespace
         }
 
         MoveList list;
-        movegen::generate_pseudo_legal_moves(pos, list);
+        if (inCheck)
+            movegen::generateEvasions(pos, legality, list);
+        else
+            movegen::generate_pseudo_legal_moves(pos, list);
 
         MovePicker picker;
         picker.init(pos, list, ttMove, counter, ply, false);
@@ -1537,7 +1540,7 @@ namespace
 
         MoveList list;
         if (inCheck)
-            movegen::generate_pseudo_legal_moves(pos, list);
+            movegen::generateEvasions(pos, legality, list);
         else
             movegen::generate_tactical_moves(pos, list);
 

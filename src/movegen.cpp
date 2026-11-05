@@ -359,7 +359,8 @@ namespace
         pos.sideToMove = them;
     }
 
-    void generatePawnMoves(const Position &pos, Bitboard empty, MoveList &list, bool tacticalOnly = false)
+    void generatePawnMoves(const Position &pos, Bitboard empty, MoveList &list, bool tacticalOnly = false,
+                           Bitboard target = ~0ULL)
     {
         const Color us = pos.sideToMove;
         const Color them = static_cast<Color>(us ^ 1);
@@ -368,8 +369,9 @@ namespace
 
         const Bitboard pawns = pos.byColor[us] & pos.byType[PAWN];
         const Bitboard single = (us == WHITE ? pawns << 8 : pawns >> 8) & empty;
+        const Bitboard victims = pos.byColor[them] & target;
 
-        Bitboard b = single & promoRank;
+        Bitboard b = single & promoRank & target;
         while (b)
         {
             const Square to = popLsb(b);
@@ -380,14 +382,14 @@ namespace
             list.add(Move(from, to, PROMOTION | KNIGHT_PROMO));
         }
 
-        b = single & ~promoRank;
+        b = single & ~promoRank & target;
         while (!tacticalOnly && b)
         {
             const Square to = popLsb(b);
             list.add(Move(static_cast<Square>(to - up), to));
         }
 
-        b = (us == WHITE ? ((pawns & RANK_2_BB) << 16) : ((pawns & RANK_7_BB) >> 16)) & empty & (us == WHITE ? empty << 8 : empty >> 8);
+        b = (us == WHITE ? ((pawns & RANK_2_BB) << 16) : ((pawns & RANK_7_BB) >> 16)) & empty & (us == WHITE ? empty << 8 : empty >> 8) & target;
         while (!tacticalOnly && b)
         {
             const Square to = popLsb(b);
@@ -400,11 +402,11 @@ namespace
             const Square from = popLsb(p);
             const Bitboard pawnAttacksFrom = pawnAttacks[us][from];
 
-            Bitboard caps = pawnAttacksFrom & pos.byColor[them] & ~promoRank;
+            Bitboard caps = pawnAttacksFrom & victims & ~promoRank;
             while (caps)
                 list.add(Move(from, popLsb(caps)));
 
-            caps = pawnAttacksFrom & pos.byColor[them] & promoRank;
+            caps = pawnAttacksFrom & victims & promoRank;
             while (caps)
             {
                 const Square to = popLsb(caps);
@@ -419,10 +421,11 @@ namespace
         }
     }
 
-    void generatePieceMoves(const Position &pos, PieceType pt, MoveList &list, bool tacticalOnly = false)
+    void generatePieceMoves(const Position &pos, PieceType pt, MoveList &list, bool tacticalOnly = false,
+                            Bitboard target = ~0ULL)
     {
         const Bitboard occ = pos.byColor[WHITE] | pos.byColor[BLACK];
-        const Bitboard notOurs = ~pos.byColor[pos.sideToMove];
+        const Bitboard notOurs = ~pos.byColor[pos.sideToMove] & target;
 
         Bitboard pieces = pos.byColor[pos.sideToMove] & pos.byType[pt];
         while (pieces)
@@ -553,6 +556,24 @@ void movegen::generate_pseudo_legal_moves(const Position &pos, MoveList &list)
     generatePieceMoves(pos, QUEEN, list);
     generateKingMoves(pos, list);
     generateCastling(pos, list);
+}
+
+void movegen::generateEvasions(const Position &pos, const Legality &info, MoveList &list)
+{
+    list.clear();
+
+    if (!(info.checkers & (info.checkers - 1)))
+    {
+        const Bitboard empty = ~(pos.byColor[WHITE] | pos.byColor[BLACK]);
+        const Bitboard target = betweenTable[info.king][lsb(info.checkers)] | info.checkers;
+
+        generatePawnMoves(pos, empty, list, false, target);
+        generatePieceMoves(pos, KNIGHT, list, false, target);
+        generatePieceMoves(pos, BISHOP, list, false, target);
+        generatePieceMoves(pos, ROOK, list, false, target);
+        generatePieceMoves(pos, QUEEN, list, false, target);
+    }
+    generateKingMoves(pos, list);
 }
 
 void movegen::generate_tactical_moves(const Position &pos, MoveList &list)
