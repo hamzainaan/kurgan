@@ -72,6 +72,14 @@ namespace
          {1, 26, 568, 13744, 314346, 0, 0},
          true},
     };
+
+    void generateMoves(const Position &pos, const movegen::Legality &legality, MoveList &list)
+    {
+        if (legality.checkers)
+            movegen::generateEvasions(pos, legality, list);
+        else
+            movegen::generatePseudoLegalMoves(pos, list);
+    }
 }
 
 uint64_t perft::nodes(Position &pos, int depth)
@@ -81,10 +89,7 @@ uint64_t perft::nodes(Position &pos, int depth)
 
     movegen::Legality legality = movegen::legality(pos);
     MoveList list;
-    if (legality.checkers)
-        movegen::generateEvasions(pos, legality, list);
-    else
-        movegen::generatePseudoLegalMoves(pos, list);
+    generateMoves(pos, legality, list);
 
     uint64_t n = 0;
     for (int i = 0; i < list.size; ++i)
@@ -106,10 +111,7 @@ void perft::divide(Position &pos, int depth)
 
     movegen::Legality legality = movegen::legality(pos);
     MoveList list;
-    if (legality.checkers)
-        movegen::generateEvasions(pos, legality, list);
-    else
-        movegen::generatePseudoLegalMoves(pos, list);
+    generateMoves(pos, legality, list);
 
     uint64_t total = 0;
     for (int i = 0; i < list.size; ++i)
