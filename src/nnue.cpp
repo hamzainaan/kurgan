@@ -19,9 +19,9 @@ extern "C"
 
 namespace
 {
-    std::string g_file;
-    std::string g_error;
-    bool g_enabled = true;
+    std::string netFile;
+    std::string loadError;
+    bool netEnabled = true;
 }
 
 #ifndef KURGAN_NNUE
@@ -29,11 +29,11 @@ namespace
 bool nnue::loadEmbedded() { return false; }
 void nnue::unload() {}
 bool nnue::loaded() { return false; }
-const std::string &nnue::error() { return g_error; }
-void nnue::setEnabled(bool value) { g_enabled = value; }
-bool nnue::enabled() { return g_enabled; }
+const std::string &nnue::error() { return loadError; }
+void nnue::setEnabled(bool value) { netEnabled = value; }
+bool nnue::enabled() { return netEnabled; }
 bool nnue::active() { return false; }
-const std::string &nnue::file() { return g_file; }
+const std::string &nnue::file() { return netFile; }
 uint32_t nnue::hash() { return 0; }
 int nnue::evaluate(const Position &) { return 0; }
 
@@ -54,10 +54,10 @@ namespace
         bool narrowHead = false;
     };
 
-    Network *g_net = nullptr;
+    Network *network = nullptr;
 
     // Incremented whenever the network changes so cached accumulators go stale.
-    uint32_t g_generation = 1;
+    uint32_t netGeneration = 1;
 
     uint32_t fnv1a(const void *data, size_t size)
     {
@@ -313,25 +313,25 @@ namespace
         uint32_t generation = 0;
     };
 
-    thread_local HalfCache g_halfCache[COLOR_NB][64];
-    thread_local Square g_lastKing[COLOR_NB] = {SQ_NONE, SQ_NONE};
+    thread_local HalfCache halfCaches[COLOR_NB][64];
+    thread_local Square lastKing[COLOR_NB] = {SQ_NONE, SQ_NONE};
 
     const int16_t *refreshHalf(const Position &pos, const Network &net, int colour)
     {
         const Square king = perspectiveKing(pos, colour);
-        HalfCache &cache = g_halfCache[colour][king];
+        HalfCache &cache = halfCaches[colour][king];
         stats::Tally &tally = stats::current();
 
-        if (cache.generation != g_generation)
+        if (cache.generation != netGeneration)
         {
             ++tally.evalRebuilds;
             std::memcpy(cache.values, net.ftBias, sizeof(cache.values));
             std::memset(cache.byPiece, 0, sizeof(cache.byPiece));
-            cache.generation = g_generation;
+            cache.generation = netGeneration;
         }
-        else if (g_lastKing[colour] != king)
+        else if (lastKing[colour] != king)
             ++tally.evalRefills;
-        g_lastKing[colour] = king;
+        lastKing[colour] = king;
 
         const int base = kingBucket(king) * nnue::FEATURES_PER_BUCKET;
         const int flip = (colour == BLACK ? 56 : 0) ^ ((king & 4) ? 7 : 0);
@@ -389,15 +389,15 @@ bool nnue::loadFromMemory(const uint8_t *data, size_t size, const std::string &n
 
     if (size >= 4 && std::memcmp(data, &LEGACY_MAGIC, 4) == 0)
     {
-        g_error = "KNNUEv1 container, retrain";
+        loadError = "KNNUEv1 container, retrain";
         return false;
     }
     if (size != NET_SIZE)
     {
-        g_error = "size ";
-        g_error += std::to_string(size);
-        g_error += ", a quantised net has ";
-        g_error += std::to_string(NET_SIZE);
+        loadError = "size ";
+        loadError += std::to_string(size);
+        loadError += ", a quantised net has ";
+        loadError += std::to_string(NET_SIZE);
         return false;
     }
 
@@ -419,9 +419,9 @@ bool nnue::loadFromMemory(const uint8_t *data, size_t size, const std::string &n
             net->narrowHead = false;
 
     net->hash = fnv1a(data, size);
-    g_net = net;
-    g_file = name;
-    g_error.clear();
+    network = net;
+    netFile = name;
+    loadError.clear();
     return true;
 }
 
@@ -436,34 +436,34 @@ bool nnue::loadEmbedded()
 
 void nnue::unload()
 {
-    delete g_net;
-    g_net = nullptr;
-    g_file.clear();
-    ++g_generation;
+    delete network;
+    network = nullptr;
+    netFile.clear();
+    ++netGeneration;
 }
 
-bool nnue::loaded() { return g_net != nullptr; }
-const std::string &nnue::error() { return g_error; }
+bool nnue::loaded() { return network != nullptr; }
+const std::string &nnue::error() { return loadError; }
 
 void nnue::setEnabled(bool value)
 {
-    if (g_enabled == value)
+    if (netEnabled == value)
         return;
-    g_enabled = value;
-    ++g_generation;
+    netEnabled = value;
+    ++netGeneration;
 }
 
-bool nnue::enabled() { return g_enabled; }
+bool nnue::enabled() { return netEnabled; }
 
-bool nnue::active() { return g_net != nullptr && g_enabled; }
+bool nnue::active() { return network != nullptr && netEnabled; }
 
-const std::string &nnue::file() { return g_file; }
+const std::string &nnue::file() { return netFile; }
 
-uint32_t nnue::hash() { return g_net != nullptr ? g_net->hash : 0; }
+uint32_t nnue::hash() { return network != nullptr ? network->hash : 0; }
 
 int nnue::evaluate(const Position &pos)
 {
-    const Network &net = *g_net;
+    const Network &net = *network;
     const int16_t *us = refreshHalf(pos, net, pos.sideToMove);
     const int16_t *them = refreshHalf(pos, net, pos.sideToMove ^ 1);
 
