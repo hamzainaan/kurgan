@@ -1090,13 +1090,13 @@ namespace
             ++stats::current().nmpEligible;
         if (nmpGate && eval >= beta && staticEval >= beta)
         {
-            int R = tuned::NMP_BASE + depth / tuned::NMP_DEPTH_DIV +
-                    std::min(2, (eval - beta) / tuned::NMP_EVAL_DIV);
-            R = std::min(R, depth - 1);
+            int nullReduction = tuned::NMP_BASE + depth / tuned::NMP_DEPTH_DIV +
+                                std::min(2, (eval - beta) / tuned::NMP_EVAL_DIV);
+            nullReduction = std::min(nullReduction, depth - 1);
 
             moveStack[ply + 1] = Move();
             pos.doNullMove();
-            const int nullScore = -alphaBeta(pos, depth - 1 - R, -beta, -beta + 1, ply + 1, false, !cutNode);
+            const int nullScore = -alphaBeta(pos, depth - 1 - nullReduction, -beta, -beta + 1, ply + 1, false, !cutNode);
             pos.undoNullMove();
 
             if (stopFlag.load(std::memory_order_relaxed))
@@ -1109,7 +1109,7 @@ namespace
                 if (depth >= tuned::NMP_VERIFY_DEPTH)
                 {
                     inNullVerification = true;
-                    const int verify = alphaBeta(pos, depth - R, beta - 1, beta, ply, false, false);
+                    const int verify = alphaBeta(pos, depth - nullReduction, beta - 1, beta, ply, false, false);
                     inNullVerification = false;
 
                     if (verify >= beta)
