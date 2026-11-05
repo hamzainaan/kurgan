@@ -208,7 +208,7 @@ namespace
 
         if (token == "startpos")
         {
-            pos.set_fen(START_FEN);
+            pos.setFen(START_FEN);
         }
         else if (token == "fen")
         {
@@ -239,7 +239,7 @@ namespace
             }
 
             Position parsed = pos;
-            if (!parsed.set_fen(fen))
+            if (!parsed.setFen(fen))
             {
                 std::cout << "info string invalid fen '" << fen << '\'' << std::endl;
                 return;
@@ -263,7 +263,7 @@ namespace
                     std::cout << "info string invalid move '" << moveStr << '\'' << std::endl;
                     break;
                 }
-                if (!pos.do_move(m))
+                if (!pos.doMove(m))
                 {
                     std::cout << "info string illegal move '" << moveStr << '\'' << std::endl;
                     break;
@@ -344,7 +344,7 @@ void uci::loop()
     nnue::loadEmbedded();
 
     Position pos;
-    pos.set_fen(START_FEN);
+    pos.setFen(START_FEN);
 
     std::thread searchThread;
     bool searchActive = false;
@@ -609,7 +609,7 @@ void uci::loop()
             else if (arg.empty() && !searchRunning())
             {
                 std::lock_guard<std::mutex> lock(search::outputLock());
-                pos.print_board();
+                pos.printBoard();
                 std::cout << "Fen: " << pos.fen() << std::endl;
             }
         }

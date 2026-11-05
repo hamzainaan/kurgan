@@ -119,7 +119,7 @@ namespace
         search::clear();
 
         Position pos;
-        pos.set_fen(START_FEN);
+        pos.setFen(START_FEN);
 
         const int randomPlies = options.randomPlies + static_cast<int>(rng() & 1);
         for (int i = 0; i < randomPlies; ++i)
@@ -127,7 +127,7 @@ namespace
             const std::vector<Move> moves = legalMoves(pos);
             if (moves.empty())
                 return false;
-            pos.do_move(moves[rng() % moves.size()]);
+            pos.doMove(moves[rng() % moves.size()]);
         }
         if (legalMoves(pos).empty())
             return false;
@@ -193,7 +193,7 @@ namespace
                 break;
             }
 
-            pos.do_move(m);
+            pos.doMove(m);
         }
 
         for (size_t i = 0; i < records.size(); ++i)

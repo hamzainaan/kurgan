@@ -50,7 +50,7 @@ void bench::run(int depth)
     for (int i = 0; i < count; ++i)
     {
         Position pos;
-        pos.set_fen(POSITIONS[i]);
+        pos.setFen(POSITIONS[i]);
 
         search::clear();
 

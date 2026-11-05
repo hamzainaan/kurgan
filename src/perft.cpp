@@ -92,9 +92,9 @@ uint64_t perft::nodes(Position &pos, int depth)
         const Move m = list.moves[i];
         if (!movegen::is_legal(pos, m, legality))
             continue;
-        pos.do_move(m, true);
+        pos.doMove(m, true);
         n += nodes(pos, depth - 1);
-        pos.undo_move(m);
+        pos.undoMove(m);
     }
     return n;
 }
@@ -117,10 +117,10 @@ void perft::divide(Position &pos, int depth)
         const Move m = list.moves[i];
         if (!movegen::is_legal(pos, m, legality))
             continue;
-        pos.do_move(m, true);
+        pos.doMove(m, true);
 
         const uint64_t n = nodes(pos, depth - 1);
-        pos.undo_move(m);
+        pos.undoMove(m);
 
         total += n;
         std::cout << moveToUci(m) << ": " << n << std::endl;
@@ -137,7 +137,7 @@ bool perft::suite()
     for (size_t i = 0; i < sizeof(SUITE) / sizeof(SUITE[0]); ++i)
     {
         Position pos;
-        pos.set_fen(SUITE[i].fen);
+        pos.setFen(SUITE[i].fen);
 
         for (int depth = 1; depth <= SUITE[i].maxDepth; ++depth)
         {

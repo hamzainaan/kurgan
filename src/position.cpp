@@ -94,7 +94,7 @@ namespace
 
 Position::Position()
 {
-    set_fen(START_FEN);
+    setFen(START_FEN);
 }
 
 void Position::clear()
@@ -204,7 +204,7 @@ void Position::removePiece(Square square)
         nonPawnKey[colorOf(piece)] ^= pieceKeys[piece][square];
 }
 
-bool Position::do_move(Move move, bool knownLegal)
+bool Position::doMove(Move move, bool knownLegal)
 {
     initZobrist();
 
@@ -322,21 +322,21 @@ bool Position::do_move(Move move, bool knownLegal)
         const Bitboard k = byType[KING] & byColor[us];
         if (!k)
         {
-            undo_move(move);
+            undoMove(move);
             return false;
         }
         ksq = lsb(k);
     }
     if (movegen::squareAttacked(*this, ksq, them))
     {
-        undo_move(move);
+        undoMove(move);
         return false;
     }
 
     return true;
 }
 
-void Position::undo_move(Move move)
+void Position::undoMove(Move move)
 {
     // Recover the side that made the move.
     const Color us = static_cast<Color>(sideToMove ^ 1);
@@ -381,7 +381,7 @@ void Position::undo_move(Move move)
     putPiece(undo.movedPiece, from);
 }
 
-void Position::do_null_move()
+void Position::doNullMove()
 {
     initZobrist();
 
@@ -404,7 +404,7 @@ void Position::do_null_move()
     ++historyCount;
 }
 
-void Position::undo_null_move()
+void Position::undoNullMove()
 {
     undoCount = (undoCount - 1) & (MAX_UNDO - 1);
     UndoInfo &undo = undoStack[undoCount];
@@ -442,7 +442,7 @@ bool Position::isRepetition(int ply) const
     return false;
 }
 
-bool Position::set_fen(const std::string &fen)
+bool Position::setFen(const std::string &fen)
 {
     std::istringstream ss(fen);
     std::string boardStr, sideStr, castlingStr, epStr, halfmoveStr, fullmoveStr;
@@ -657,7 +657,7 @@ std::string Position::fen() const
     return fen;
 }
 
-void Position::print_board() const
+void Position::printBoard() const
 {
     std::cout << "\n  +---+---+---+---+---+---+---+---+\n";
     for (int r = RANK_8; r >= RANK_1; --r)

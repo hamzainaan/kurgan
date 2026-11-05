@@ -47,20 +47,20 @@ public:
     Position();
 
     // Parses a FEN string and returns false when it is malformed.
-    bool set_fen(const std::string &fen);
+    bool setFen(const std::string &fen);
 
     std::string fen() const;
 
-    void print_board() const;
+    void printBoard() const;
 
     // Applies a move and returns false without changing the position when it is illegal.
-    bool do_move(Move move, bool knownLegal = false);
+    bool doMove(Move move, bool knownLegal = false);
 
     // Undoes the last move applied with do_move.
-    void undo_move(Move move);
+    void undoMove(Move move);
 
-    void do_null_move();
-    void undo_null_move();
+    void doNullMove();
+    void undoNullMove();
 
     // Checks whether the current position repeats on the search path. The ply
     // locates the root, so a second occurrence in search draws but game history

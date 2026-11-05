@@ -180,7 +180,7 @@ namespace manager
         const int gains = winningCaptures(root, true);
 
         Position flipped = root;
-        flipped.do_null_move();
+        flipped.doNullMove();
         const int threats = winningCaptures(flipped, false);
 
         rootTension = std::min(1.0, (gains + threats) / TENSION_MOVES);

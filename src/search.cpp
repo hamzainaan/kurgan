@@ -876,7 +876,7 @@ namespace
         for (int i = 0; i < list.size; ++i)
         {
             Position next = pos;
-            if (next.do_move(list.moves[i]))
+            if (next.doMove(list.moves[i]))
                 return list.moves[i];
         }
         return Move();
@@ -889,7 +889,7 @@ namespace
         for (Move m : activeLimits.searchmoves)
         {
             Position probe = root;
-            if (probe.do_move(m))
+            if (probe.doMove(m))
                 return m;
         }
         return firstLegalMove(root);
@@ -908,7 +908,7 @@ namespace
         while (n < need)
         {
             const tt::Entry *e = tt::probe(pos.zobristKey);
-            if (e == nullptr || e->move == Move() || !pos.do_move(e->move))
+            if (e == nullptr || e->move == Move() || !pos.doMove(e->move))
                 break;
 
             pvTable[ply][ply + n] = e->move;
@@ -925,7 +925,7 @@ namespace
                 const Move m = list[i];
                 if (!movegen::is_legal(pos, m, legality))
                     continue;
-                pos.do_move(m, true);
+                pos.doMove(m, true);
 
                 if (pos.sideToMove == mated && isCheckmated(pos))
                 {
@@ -935,13 +935,13 @@ namespace
                     break;
                 }
 
-                pos.undo_move(m);
+                pos.undoMove(m);
             }
         }
 
         const bool mate = n == need && pos.sideToMove == mated && isCheckmated(pos);
         while (n > 0)
-            pos.undo_move(pvTable[ply][ply + --n]);
+            pos.undoMove(pvTable[ply][ply + --n]);
 
         if (mate)
             pvLength[ply] = ply + need;
@@ -1095,9 +1095,9 @@ namespace
             R = std::min(R, depth - 1);
 
             moveStack[ply + 1] = Move();
-            pos.do_null_move();
+            pos.doNullMove();
             const int nullScore = -alphaBeta(pos, depth - 1 - R, -beta, -beta + 1, ply + 1, false, !cutNode);
-            pos.undo_null_move();
+            pos.undoNullMove();
 
             if (stopFlag.load(std::memory_order_relaxed))
                 return 0;
@@ -1141,14 +1141,14 @@ namespace
                 const Move m = probcutList.moves[i];
                 if (!see::ge(pos, m, probcutBeta - staticEval) || !movegen::is_legal(pos, m, legality))
                     continue;
-                pos.do_move(m, true);
+                pos.doMove(m, true);
 
                 moveStack[ply + 1] = m;
                 int score = -quiescence(pos, -probcutBeta, -probcutBeta + 1, ply + 1);
                 if (score >= probcutBeta)
                     score = -alphaBeta(pos, depth - tuned::PROBCUT_DEPTH + 1, -probcutBeta,
                                        -probcutBeta + 1, ply + 1, false, !cutNode);
-                pos.undo_move(m);
+                pos.undoMove(m);
 
                 if (stopFlag.load(std::memory_order_relaxed))
                     return 0;
@@ -1281,7 +1281,7 @@ namespace
             else if (checks && ply < 2 * rootDepth)
                 extension = 1;
 
-            pos.do_move(m, true);
+            pos.doMove(m, true);
 
             moveStack[ply + 1] = m;
             doubleExtensions[ply + 1] = doubleExtensions[ply] + (extension == 2);
@@ -1343,7 +1343,7 @@ namespace
                     score = -alphaBeta(pos, newDepth, -beta, -alpha, ply + 1, true, false);
             }
 
-            pos.undo_move(m);
+            pos.undoMove(m);
 
             if (stopFlag.load(std::memory_order_relaxed))
                 return 0;
@@ -1581,12 +1581,12 @@ namespace
 
             if (!movegen::is_legal(pos, m, legality))
                 continue;
-            pos.do_move(m, true);
+            pos.doMove(m, true);
 
             moveStack[ply + 1] = m;
             ++legalMoves;
             const int score = -quiescence(pos, -beta, -alpha, ply + 1);
-            pos.undo_move(m);
+            pos.undoMove(m);
 
             if (stopFlag.load(std::memory_order_relaxed))
                 return 0;
@@ -1695,7 +1695,7 @@ namespace
 
         for (int i = 0; i < length && played < MAX_PLY - 1; ++i)
         {
-            if (!pos.do_move(pv[i]))
+            if (!pos.doMove(pv[i]))
             {
                 complete = false;
                 break;
@@ -1711,7 +1711,7 @@ namespace
                 break;
 
             const Move m = e->move;
-            if (!pos.do_move(m))
+            if (!pos.doMove(m))
                 break;
 
             bool repeated = pos.isRepetition(played + 1);
@@ -1720,7 +1720,7 @@ namespace
                     repeated = true;
             if (repeated)
             {
-                pos.undo_move(m);
+                pos.undoMove(m);
                 break;
             }
 
@@ -1729,7 +1729,7 @@ namespace
         }
 
         for (int i = played - 1; i >= 0; --i)
-            pos.undo_move(pv[i]);
+            pos.undoMove(pv[i]);
 
         return played;
     }
@@ -2036,7 +2036,7 @@ void search::prepare(const Position &root, const SearchLimits &limits)
         for (Move requested : activeLimits.searchmoves)
         {
             Position probe = root;
-            if (probe.do_move(requested))
+            if (probe.doMove(requested))
                 usable.push_back(requested);
         }
 
