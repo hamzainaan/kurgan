@@ -954,6 +954,55 @@ namespace
         return std::min(tuned::HIST_BONUS_MUL * depth * depth, tuned::HIST_BONUS_MAX);
     }
 
+    void updateCutoffHistories(const Position &pos, Move m, Move prevMove, int depth, int ply, bool quiet,
+                               const Move *searchedQuiets, int searchedQuietCount,
+                               const Move *searchedCaptures, int searchedCaptureCount)
+    {
+        const Color us = pos.sideToMove;
+        const int bonus = historyBonus(depth);
+        if (quiet)
+        {
+            if (prevMove != Move())
+                counterMoveEntry(us, prevMove) = m;
+
+            if (killers[0][ply] != m)
+            {
+                killers[1][ply] = killers[0][ply];
+                killers[0][ply] = m;
+            }
+
+            updateHistory(history[us][m.from()][moveTarget(m)], bonus);
+            for (int k = 0; k < searchedQuietCount - 1; ++k)
+                updateHistory(history[us][searchedQuiets[k].from()][moveTarget(searchedQuiets[k])], -bonus);
+
+            const Piece piece = pos.board[m.from()];
+            const Square to = moveTarget(m);
+            for (int i = 0; i < CONT_PLIES; ++i)
+            {
+                if (contRows[i][ply] == nullptr)
+                    continue;
+                updateHistory(contRows[i][ply][pieceToIndex(piece, to)], bonus);
+                for (int k = 0; k < searchedQuietCount - 1; ++k)
+                {
+                    const Move q = searchedQuiets[k];
+                    updateHistory(contRows[i][ply][pieceToIndex(pos.board[q.from()], moveTarget(q))], -bonus);
+                }
+            }
+
+            updateHistory(pawnHistoryEntry(pos, piece, to), bonus);
+            for (int k = 0; k < searchedQuietCount - 1; ++k)
+            {
+                const Move q = searchedQuiets[k];
+                updateHistory(pawnHistoryEntry(pos, pos.board[q.from()], moveTarget(q)), -bonus);
+            }
+        }
+        else
+            updateHistory(captureHistoryEntry(pos, m), bonus);
+
+        for (int k = 0; k < searchedCaptureCount - !quiet; ++k)
+            updateHistory(captureHistoryEntry(pos, searchedCaptures[k]), -bonus);
+    }
+
     int alphaBeta(Position &pos, int depth, int alpha, int beta, int ply, bool pvNode, bool cutNode)
     {
         if (depth <= 0)
@@ -1385,48 +1434,8 @@ namespace
                         if (ttMove != Move() && m == ttMove)
                             ++stats::current().ttMoveCutoffs;
 
-                        const int bonus = historyBonus(depth);
-                        if (quiet)
-                        {
-                            if (prevMove != Move())
-                                counterMoveEntry(us, prevMove) = m;
-
-                            if (killers[0][ply] != m)
-                            {
-                                killers[1][ply] = killers[0][ply];
-                                killers[0][ply] = m;
-                            }
-
-                            updateHistory(history[us][m.from()][moveTarget(m)], bonus);
-                            for (int k = 0; k < searchedQuietCount - 1; ++k)
-                                updateHistory(history[us][searchedQuiets[k].from()][moveTarget(searchedQuiets[k])], -bonus);
-
-                            const Piece piece = pos.board[m.from()];
-                            const Square to = moveTarget(m);
-                            for (int i = 0; i < CONT_PLIES; ++i)
-                            {
-                                if (contRows[i][ply] == nullptr)
-                                    continue;
-                                updateHistory(contRows[i][ply][pieceToIndex(piece, to)], bonus);
-                                for (int k = 0; k < searchedQuietCount - 1; ++k)
-                                {
-                                    const Move q = searchedQuiets[k];
-                                    updateHistory(contRows[i][ply][pieceToIndex(pos.board[q.from()], moveTarget(q))], -bonus);
-                                }
-                            }
-
-                            updateHistory(pawnHistoryEntry(pos, piece, to), bonus);
-                            for (int k = 0; k < searchedQuietCount - 1; ++k)
-                            {
-                                const Move q = searchedQuiets[k];
-                                updateHistory(pawnHistoryEntry(pos, pos.board[q.from()], moveTarget(q)), -bonus);
-                            }
-                        }
-                        else
-                            updateHistory(captureHistoryEntry(pos, m), bonus);
-
-                        for (int k = 0; k < searchedCaptureCount - !quiet; ++k)
-                            updateHistory(captureHistoryEntry(pos, searchedCaptures[k]), -bonus);
+                        updateCutoffHistories(pos, m, prevMove, depth, ply, quiet, searchedQuiets, searchedQuietCount,
+                                              searchedCaptures, searchedCaptureCount);
                         break;
                     }
                 }
