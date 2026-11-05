@@ -569,7 +569,6 @@ namespace
     {
         int score;
         Move move;
-        uint16_t order; // Generation index used as a stable tie-break.
         int history;
         int64_t rank;
     };
@@ -678,7 +677,7 @@ namespace
                     value = h;
 
                 const int64_t rank = static_cast<int64_t>(value) * 65536 + (65535 - i);
-                moves[count] = {value, m, static_cast<uint16_t>(i), h, rank};
+                moves[count] = {value, m, h, rank};
                 ++count;
             }
         }
