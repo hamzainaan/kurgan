@@ -92,7 +92,7 @@ namespace movegen
 {
     // Builds all attack tables and must run before move generation.
     void init();
-    
+
     // Selects Chess960 castling notation for UCI input and output.
     void setChess960(bool enabled);
     bool chess960();

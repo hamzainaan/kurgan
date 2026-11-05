@@ -915,7 +915,6 @@ namespace
             ++n;
         }
 
-
         if (n == need - 1)
         {
             MoveList list;

@@ -258,7 +258,6 @@ bool Position::do_move(Move move, bool knownLegal)
         putPiece(move.isPromotion() ? makePiece(us, move.promoType()) : piece, to);
     }
 
-
     if (pt == KING)
     {
         castlingRights = static_cast<uint8_t>(
