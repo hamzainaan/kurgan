@@ -29,7 +29,9 @@
 
 namespace
 {
+    // Openings scored beyond this are discarded
     constexpr int OPENING_MAX_SCORE = 500;
+    // Adjudication thresholds for decided and dead drawn games
     constexpr int WIN_SCORE = 2500;
     constexpr int WIN_PLIES = 4;
     constexpr int DRAW_SCORE = 10;
@@ -38,12 +40,13 @@ namespace
     constexpr int MAX_GAME_PLIES = 400;
     constexpr int REPORT_SECONDS = 10;
 
+    // Bulletformat record seen from the side to move
     struct Record
     {
         uint64_t occ = 0;
         uint8_t pcs[16] = {};
         int16_t score = 0;
-        uint8_t result = 1;
+        uint8_t result = 1; // Game result for the side to move as 0 1 or 2
         uint8_t ksq = 0;
         uint8_t oppKsq = 0;
         uint8_t extra[3] = {};
@@ -53,6 +56,7 @@ namespace
 
     using Clock = std::chrono::steady_clock;
 
+    // Packs the position with the board flipped when black is to move
     Record encode(const Position &pos, int score)
     {
         Record r;
@@ -97,6 +101,7 @@ namespace
         return ksq != SQ_NONE && movegen::squareAttacked(pos, ksq, static_cast<Color>(pos.sideToMove ^ 1));
     }
 
+    // True when only kings and at most one minor piece remain
     bool bareMinors(const Position &pos)
     {
         if (pos.byType[PAWN] | pos.byType[ROOK] | pos.byType[QUEEN])
@@ -104,6 +109,7 @@ namespace
         return std::bitset<64>(pos.byType[KNIGHT] | pos.byType[BISHOP]).count() <= 1;
     }
 
+    // Searches the position and returns the best move and its score
     Move think(const Position &pos, const search::SearchLimits &limits, int &score)
     {
         search::prepare(pos, limits);
@@ -113,6 +119,7 @@ namespace
         return search::bestMove();
     }
 
+    // Plays one game and labels its quiet positions with the final result
     bool playGame(std::mt19937_64 &rng, const datagen::Options &options, std::vector<Record> &records)
     {
         records.clear();
@@ -201,6 +208,7 @@ namespace
         return true;
     }
 
+    // Counts the whole records already stored in the files
     uint64_t recordsIn(const std::vector<std::string> &paths)
     {
         uint64_t total = 0;
@@ -214,6 +222,7 @@ namespace
         return total;
     }
 
+    // Cuts a partial trailing record left by an interrupted run
     void alignFile(const std::string &path)
     {
         std::error_code ec;
@@ -242,6 +251,7 @@ namespace
                   << std::endl;
     }
 
+    // Appends games to one file until the worker target is reached
     void work(const datagen::Options &options, uint64_t target, uint64_t seed, const std::string &path, bool verbose)
     {
         search::setSilent(true);
@@ -283,6 +293,7 @@ namespace
         std::fclose(file);
     }
 
+    // Clamps the requested options and picks a seed when none is given
     datagen::Options normalized(const datagen::Options &requested)
     {
         datagen::Options options = requested;
@@ -300,6 +311,7 @@ namespace
         return options;
     }
 
+    // Names output files after the active network
     std::string netTag()
     {
         char tag[16];
@@ -319,6 +331,7 @@ namespace
         uint64_t base = 0;
     };
 
+    // Gives each worker its own seed and output file
     WorkPlan planWork(const datagen::Options &options, const std::string &tag)
     {
         WorkPlan plan;
@@ -338,6 +351,7 @@ namespace
     }
 
 #if defined(_WIN32)
+    // Windows has no fork so a single worker runs in process
     void runWorkers(const datagen::Options &options, const WorkPlan &plan, Clock::time_point)
     {
         const int savedThreads = search::threadSetting();
@@ -348,6 +362,7 @@ namespace
         search::setHashSize(savedHash);
     }
 #else
+    // Forks one process per worker and reports progress until all exit
     void runWorkers(const datagen::Options &options, const WorkPlan &plan, Clock::time_point start)
     {
         std::cout.flush();
