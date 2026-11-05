@@ -23,6 +23,7 @@ namespace
                (movegen::attacks(ROOK, to, occ) & (pos.byType[ROOK] | pos.byType[QUEEN]));
     }
 
+    // Returns the cheapest piece type among the attackers
     int leastValuableAttacker(const Position &pos, Bitboard attackers)
     {
         for (int t = PAWN; t <= static_cast<int>(KING); ++t)
