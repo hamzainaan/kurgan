@@ -396,7 +396,13 @@ namespace
             list.add(Move(static_cast<Square>(to - 2 * up), to));
         }
 
-        Bitboard p = pawns;
+        Bitboard reach = victims;
+        if (pos.enPassantSquare != SQ_NONE)
+            reach |= 1ULL << pos.enPassantSquare;
+        const Bitboard capturers = us == WHITE ? ((reach & ~FILE_A_BB) >> 9) | ((reach & ~FILE_H_BB) >> 7)
+                                               : ((reach & ~FILE_A_BB) << 7) | ((reach & ~FILE_H_BB) << 9);
+
+        Bitboard p = pawns & capturers;
         while (p)
         {
             const Square from = popLsb(p);
