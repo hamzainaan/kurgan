@@ -19,6 +19,7 @@ namespace
     std::array<Bitboard, SQUARE_NB> kingAttacks;
     std::array<std::array<Bitboard, SQUARE_NB>, COLOR_NB> pawnAttacks;
 
+    // Magic bitboard lookup data for one square
     struct Magic
     {
         Bitboard mask;
@@ -71,6 +72,7 @@ namespace
         0x680182A890100882ULL, 0x8E0B8081CC3E2025ULL, 0xD8000E0204420800ULL, 0x41104A0009420A0CULL,
         0x0021414A106A0208ULL, 0x0C44940821082180ULL, 0x4004E00875411C02ULL, 0xD088600C9A00C705ULL};
 
+    // Slow ray walk used only to fill the magic tables
     Bitboard slidingAttack(int sq, Bitboard occ, const int *df, const int *dr)
     {
         Bitboard attacks = 0;
@@ -107,6 +109,7 @@ namespace
         return slidingAttack(sq, occ, df, dr);
     }
 
+    // Fills the knight and king and pawn attack tables
     void initLeapers()
     {
         for (int s = 0; s < SQUARE_NB; ++s)
@@ -160,6 +163,7 @@ namespace
         }
     }
 
+    // Fills the attack table of every square for each blocker subset
     void initMagics(Magic *magics, Bitboard *table, [[maybe_unused]] size_t tableSize, const uint64_t *magicNumbers, bool rook)
     {
         size_t offset = 0;
@@ -208,6 +212,7 @@ namespace
         return m.attacks[((occ & m.mask) * m.magic) >> m.shift];
     }
 
+    // Fills the squares strictly between aligned square pairs
     void initBetween()
     {
         for (int a = 0; a < SQUARE_NB; ++a)
@@ -270,6 +275,7 @@ namespace
         return betweenTable[a][b];
     }
 
+    // Checks the king against attacks on the occupancy after the move
     bool kingSafeAfter(const Position &pos, Move move, Square ksq)
     {
         const Color us = pos.sideToMove;
@@ -291,6 +297,7 @@ namespace
                  | (rookAttack(ksq, occ) & theirs & (pos.byType[ROOK] | pos.byType[QUEEN])));
     }
 
+    // Returns own pieces pinned to the king
     Bitboard pinnedPieces(const Position &pos, Square ksq)
     {
         const Color us = pos.sideToMove;
@@ -359,6 +366,7 @@ namespace
         pos.sideToMove = them;
     }
 
+    // Generates pawn pushes and captures and promotions and en passant within target
     void generatePawnMoves(const Position &pos, Bitboard empty, MoveList &list, bool tacticalOnly = false,
                            Bitboard target = ~0ULL)
     {
@@ -458,6 +466,7 @@ namespace
             list.add(Move(ksq, popLsb(targets)));
     }
 
+    // Adds the castling moves that pass every legality check
     void generateCastling(const Position &pos, MoveList &list)
     {
         const Color us = pos.sideToMove;

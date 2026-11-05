@@ -46,6 +46,7 @@ struct Move
     constexpr bool operator!=(Move m) const { return data != m.data; }
 };
 
+// Castling stores the rook origin so a rook right of the king means king side
 constexpr bool isKingSideCastling(Move m)
 {
     return m.to() > m.from();
@@ -61,6 +62,7 @@ constexpr Square castlingRookTo(Move m)
     return makeSquare(isKingSideCastling(m) ? FILE_F : FILE_D, rankOf(m.from()));
 }
 
+// Returns the square the moving piece lands on
 constexpr Square moveTarget(Move m)
 {
     return m.isCastling() ? castlingKingTo(m) : m.to();
@@ -104,8 +106,10 @@ namespace movegen
     // Returns the attacks of a non-pawn piece under the given occupancy.
     Bitboard attacks(PieceType pt, Square sq, Bitboard occupied);
 
+    // Returns the squares a pawn of the given color attacks
     Bitboard pawnAttacksFrom(Color c, Square sq);
 
+    // Checks whether any piece of the given color attacks the square
     bool squareAttacked(const Position &pos, Square sq, Color by);
 
     // Checks whether a move is a capture, promotion or en passant.
@@ -115,6 +119,7 @@ namespace movegen
         return type == NORMAL ? pos.board[m.to()] != NO_PIECE : type != CASTLING;
     }
 
+    // Generates every pseudo legal move including castling
     void generatePseudoLegalMoves(const Position &pos, MoveList &list);
 
     // Generates the tactical subset in the same relative order as the full generator.
@@ -123,20 +128,25 @@ namespace movegen
     // Checks whether a pseudo-legal move leaves the king out of check.
     bool isLegal(const Position &pos, Move move);
 
+    // Check and pin data shared by the legality tests of one node
     struct Legality
     {
         Square king = SQ_NONE;
         Bitboard checkers = 0;
         Bitboard pinned = 0;
         Bitboard safe = 0;
-        bool pinsReady = false;
+        bool pinsReady = false; // Pinned and safe are filled on first use
     };
 
+    // Finds the king and its checkers
     Legality legality(const Position &pos);
 
+    // Faster legality test that reuses the node legality data
     bool isLegal(const Position &pos, Move move, Legality &info);
 
+    // Generates king moves and against a single check also blocks and captures
     void generateEvasions(const Position &pos, const Legality &info, MoveList &list);
 
+    // Validates an arbitrary move such as a table move against the position
     bool isPseudoLegal(const Position &pos, Move move);
 }
