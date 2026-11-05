@@ -58,7 +58,7 @@ public:
     // Applies a move and returns false without changing the position when it is illegal.
     bool doMove(Move move, bool knownLegal = false);
 
-    // Undoes the last move applied with do_move.
+    // Undoes the last move applied with doMove.
     void undoMove(Move move);
 
     // Passes the turn without moving for null move pruning
