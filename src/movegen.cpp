@@ -33,6 +33,8 @@ namespace
     std::array<Bitboard, 0x19000> rookTable;
     std::array<Bitboard, 0x1480> bishopTable;
 
+    std::array<std::array<Bitboard, SQUARE_NB>, SQUARE_NB> betweenTable;
+
     constexpr uint64_t rookMagics[SQUARE_NB] = {
         0x0780001081400021ULL, 0x0140025004402000ULL, 0x1080200082081000ULL, 0x2580100018000480ULL,
         0x0600200822009410ULL, 0x0200100A00080104ULL, 0x04003A10180C0081ULL, 0x0300028022004500ULL,
@@ -206,6 +208,26 @@ namespace
         return m.attacks[((occ & m.mask) * m.magic) >> m.shift];
     }
 
+    void initBetween()
+    {
+        for (int a = 0; a < SQUARE_NB; ++a)
+        {
+            const Square from = static_cast<Square>(a);
+            for (int b = 0; b < SQUARE_NB; ++b)
+            {
+                const Square to = static_cast<Square>(b);
+                const Bitboard fromBit = 1ULL << a;
+                const Bitboard toBit = 1ULL << b;
+                if (rookAttack(from, 0) & toBit)
+                    betweenTable[a][b] = rookAttack(from, toBit) & rookAttack(to, fromBit);
+                else if (bishopAttack(from, 0) & toBit)
+                    betweenTable[a][b] = bishopAttack(from, toBit) & bishopAttack(to, fromBit);
+                else
+                    betweenTable[a][b] = 0;
+            }
+        }
+    }
+
     Bitboard pieceAttacks(PieceType pt, Square sq, Bitboard occ)
     {
         switch (pt)
@@ -245,12 +267,7 @@ namespace
     // Returns the squares strictly between two squares on the same rank.
     Bitboard betweenOnRank(Square a, Square b)
     {
-        const int lo = a < b ? a : b;
-        const int hi = a < b ? b : a;
-        Bitboard between = 0;
-        for (int s = lo + 1; s < hi; ++s)
-            between |= 1ULL << s;
-        return between;
+        return betweenTable[a][b];
     }
 
     void putPiece(Position &pos, Piece p, Square sq)
@@ -466,6 +483,7 @@ void movegen::init()
     initLeapers();
     initMagics(rookMagic.data(), rookTable.data(), rookTable.size(), rookMagics, true);
     initMagics(bishopMagic.data(), bishopTable.data(), bishopTable.size(), bishopMagics, false);
+    initBetween();
 }
 
 Bitboard movegen::attacks(PieceType pt, Square sq, Bitboard occupied)
