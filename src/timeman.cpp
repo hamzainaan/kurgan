@@ -67,6 +67,10 @@ namespace
     constexpr double FALLING_SCALE = 60.0;
     constexpr double FALLING_W = 0.60;
     constexpr double ITERATION_GROWTH = 1.2;
+    constexpr double EFFORT_PIVOT = 0.66;
+    constexpr double EFFORT_W = 1.2;
+    constexpr double EFFORT_MIN = 0.70;
+    constexpr double EFFORT_MAX = 1.40;
 
     // Budget of the current search shared with the search threads
     std::atomic<Clock::rep> startRep{0};
@@ -95,6 +99,7 @@ namespace
     int observedScore = 0;
     int observedSwing = 0;
     int observedStable = 0;
+    double observedEffort = 0.0;
 
     double lerp(double from, double to, double t)
     {
@@ -158,6 +163,12 @@ namespace
         return count;
     }
 
+    // Spends less time when the best move took most of the search and more when rivals were close
+    double effortScale()
+    {
+        return std::clamp(1.0 + EFFORT_W * (EFFORT_PIVOT - observedEffort), EFFORT_MIN, EFFORT_MAX);
+    }
+
     // Checks whether the deadline may still be extended
     bool extensible(double tactical)
     {
@@ -188,6 +199,7 @@ namespace manager
         observedScore = 0;
         observedSwing = 0;
         observedStable = 0;
+        observedEffort = 0.0;
 
         if (inCheck)
         {
@@ -299,11 +311,12 @@ namespace manager
         moveOverheadMs = ms;
     }
 
-    void observe(int score, int scoreDrop, int stableIterations)
+    void observe(int score, int scoreDrop, int stableIterations, double bestMoveEffort)
     {
         observedScore = score;
         observedSwing = scoreDrop < 0 ? -scoreDrop : scoreDrop;
         observedStable = stableIterations;
+        observedEffort = bestMoveEffort;
     }
 
     bool extend()
@@ -387,6 +400,8 @@ namespace manager
             if (scoreDrop > 0)
                 factor *= 1.0 + FALLING_W * std::min(1.0, scoreDrop / FALLING_SCALE);
         }
+
+        factor *= effortScale();
 
         const double scale = lerp(TIME_SCALE_MIN, TIME_SCALE_MAX, criticality(pos, score, scoreDrop, stableIterations));
         const int64_t maximum = maximumMs.load(std::memory_order_relaxed);

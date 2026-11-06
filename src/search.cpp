@@ -202,6 +202,9 @@ namespace
     thread_local int partialScore = 0;
     thread_local bool partialLowerBound = false;
     thread_local int rootBestScore = 0;
+    // Nodes searched below each root move during the current search
+    thread_local uint64_t rootMoveNodes[SQUARE_NB][SQUARE_NB];
+    thread_local uint64_t rootNodesTotal = 0;
     int lmrTable[MAX_DEPTH][64]; // Late move reductions by depth and move number
 
     // Helper threads skip depths in staggered patterns to diversify the search.
@@ -1361,6 +1364,7 @@ namespace
             else if (checks && ply < 2 * rootDepth)
                 extension = 1;
 
+            const uint64_t nodesBefore = nodes;
             pos.doMove(m, true);
 
             moveStack[ply + 1] = m;
@@ -1425,6 +1429,12 @@ namespace
             }
 
             pos.undoMove(m);
+
+            if (ply == 0 && currentMultiPV == 1)
+            {
+                rootMoveNodes[m.from()][m.to()] += nodes - nodesBefore;
+                rootNodesTotal += nodes - nodesBefore;
+            }
 
             if (stopFlag.load(std::memory_order_relaxed))
                 return 0;
@@ -1838,6 +1848,16 @@ namespace
         std::memset(pvLength, 0, sizeof(pvLength));
         excludedRootMoves.clear();
         stats::current() = stats::Tally{};
+        std::memset(rootMoveNodes, 0, sizeof(rootMoveNodes));
+        rootNodesTotal = 0;
+    }
+
+    // Share of the root nodes spent below the given move
+    double rootMoveEffort(Move m)
+    {
+        if (rootNodesTotal == 0)
+            return 0.0;
+        return static_cast<double>(rootMoveNodes[m.from()][m.to()]) / static_cast<double>(rootNodesTotal);
     }
 
     // Sorts MultiPV lines by score and keeps ties in search order
@@ -2018,7 +2038,7 @@ namespace
                     stableIterations = 0;
                 }
 
-                manager::observe(previousScore, scoreDrop, stableIterations);
+                manager::observe(previousScore, scoreDrop, stableIterations, rootMoveEffort(iterationBest));
 
                 if (manager::budgeted()
                     && manager::shouldStop(pos, previousScore, scoreDrop, stableIterations, depth,

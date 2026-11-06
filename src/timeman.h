@@ -16,7 +16,7 @@ namespace manager
     void setMoveOverhead(int ms); // Reserves time for communication delay
 
     // Supplies the latest score stability data for time decisions.
-    void observe(int score, int scoreDrop, int stableIterations);
+    void observe(int score, int scoreDrop, int stableIterations, double bestMoveEffort);
 
     // Extends the deadline for a tactical position and reports success.
     bool extend();
