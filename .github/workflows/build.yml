@@ -5,6 +5,11 @@ on:
     types: [closed]
     branches: [main]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -46,7 +51,7 @@ jobs:
           ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
       - if: matrix.packages
         run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
-      - run: make VERSION=${{ github.ref_type == 'tag' && github.ref_name || 'dev' }} -j"$(nproc)" MODE=release TIER=${{ matrix.tier }} CXX=${{ matrix.cxx }} CXXFLAGS=-static
+      - run: make VERSION=${{ inputs.version || github.ref_type == 'tag' && github.ref_name || 'dev' }} -j"$(nproc)" MODE=release TIER=${{ matrix.tier }} CXX=${{ matrix.cxx }} CXXFLAGS=-static
       - if: matrix.verify
         run: printf 'bench\nquit\n' | ./kurgan | grep -q "Nodes searched"
       - run: cp kurgan kurgan-${{ matrix.target }}
@@ -87,7 +92,7 @@ jobs:
           update: true
           cache: false
           install: make mingw-w64-ucrt-x86_64-gcc
-      - run: make VERSION=${{ github.ref_type == 'tag' && github.ref_name || 'dev' }} -j"$(nproc)" MODE=release TIER=${{ matrix.tier }} CXX=x86_64-w64-mingw32-g++ CXXFLAGS=-static
+      - run: make VERSION=${{ inputs.version || github.ref_type == 'tag' && github.ref_name || 'dev' }} -j"$(nproc)" MODE=release TIER=${{ matrix.tier }} CXX=x86_64-w64-mingw32-g++ CXXFLAGS=-static
       - if: matrix.verify
         run: printf 'bench\nquit\n' | ./kurgan.exe | grep -q "Nodes searched"
       - run: cp kurgan.exe kurgan-${{ matrix.target }}.exe
@@ -118,7 +123,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
-      - run: make VERSION=${{ github.ref_type == 'tag' && github.ref_name || 'dev' }} -j"$(sysctl -n hw.ncpu)" MODE=release TIER=${{ matrix.tier }} LTO=${{ matrix.lto }} CXXFLAGS="${{ matrix.arch }} -mmacosx-version-min=11.0"
+      - run: make VERSION=${{ inputs.version || github.ref_type == 'tag' && github.ref_name || 'dev' }} -j"$(sysctl -n hw.ncpu)" MODE=release TIER=${{ matrix.tier }} LTO=${{ matrix.lto }} CXXFLAGS="${{ matrix.arch }} -mmacosx-version-min=11.0"
       - if: matrix.verify == 'exec'
         run: printf 'bench\nquit\n' | ./kurgan | grep -q "Nodes searched"
       - if: matrix.verify == 'lipo'
@@ -157,7 +162,7 @@ jobs:
           packages: ''
       - run: sdkmanager "ndk;$NDK"
       - run: |
-          make VERSION=${{ github.ref_type == 'tag' && github.ref_name || 'dev' }} -j"$(nproc)" MODE=release TIER=baseline \
+          make VERSION=${{ inputs.version || github.ref_type == 'tag' && github.ref_name || 'dev' }} -j"$(nproc)" MODE=release TIER=baseline \
             CXX="$ANDROID_SDK_ROOT/ndk/$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" \
             CXXFLAGS="--target=${{ matrix.abi }}${{ matrix.api }} -static-libstdc++"
           cp kurgan kurgan-${{ matrix.target }}
