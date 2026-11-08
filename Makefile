@@ -17,7 +17,22 @@ VARIANT  := $(TIER)
 MODE      ?= release
 SRC_DIR   := src
 BUILD_DIR := build
-OBJ_DIR   := $(BUILD_DIR)/obj/$(MODE)/$(VARIANT)
+PGO_DATA  := $(BUILD_DIR)/pgodata
+
+ifneq ($(filter profile-gen profile-use,$(MODE)),)
+  OBJ_DIR   := $(BUILD_DIR)/obj/pgo/$(VARIANT)
+  MODE_STAMP := $(OBJ_DIR)/.mode-stamp
+  ifneq ($(MODE),$(shell cat $(MODE_STAMP) 2>/dev/null))
+    $(shell mkdir -p $(OBJ_DIR))
+    $(shell printf '%s' '$(MODE)' > $(MODE_STAMP))
+    ifeq ($(MODE),profile-gen)
+      $(shell rm -rf $(PGO_DATA))
+    endif
+  endif
+else
+  OBJ_DIR   := $(BUILD_DIR)/obj/$(MODE)/$(VARIANT)
+  MODE_STAMP :=
+endif
 
 SRCS := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRCS))
@@ -133,9 +148,9 @@ else
   else ifeq ($(MODE),debug)
     OPT := -O0 -g3 -DDEBUG
   else ifeq ($(MODE),profile-gen)
-    OPT := -O3 -DNDEBUG $(ARCHFLAGS) -fprofile-generate=$(BUILD_DIR)/pgodata
+    OPT := -O3 -DNDEBUG $(ARCHFLAGS) -fprofile-generate=$(PGO_DATA)
   else ifeq ($(MODE),profile-use)
-    OPT := -O3 -DNDEBUG $(ARCHFLAGS) -flto -fprofile-use=$(BUILD_DIR)/pgodata -fprofile-correction
+    OPT := -O3 -DNDEBUG $(ARCHFLAGS) -flto -fprofile-use=$(PGO_DATA) -fprofile-correction
   else
     $(error Unknown MODE: $(MODE))
   endif
@@ -152,7 +167,7 @@ all: $(EXE)
 $(EXE): $(LINK_OBJS) $(VARIANT_STAMP)
 	$(LINK)
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | $(OBJ_DIR)
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp $(MODE_STAMP) | $(OBJ_DIR)
 	$(COMPILE)
 
 $(OBJ_DIR):
