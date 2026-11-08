@@ -151,7 +151,7 @@ else
   else ifeq ($(MODE),profile-gen)
     OPT := -O3 -DNDEBUG $(ARCHFLAGS) -fprofile-generate=$(PGO_DATA)
   else ifeq ($(MODE),profile-use)
-    OPT := -O3 -DNDEBUG $(ARCHFLAGS) -flto -fprofile-use=$(PGO_DATA) -fprofile-correction
+    OPT := -O3 -DNDEBUG $(ARCHFLAGS) -flto -fprofile-use=$(PGO_DATA) -fprofile-correction -fno-unroll-loops -fno-peel-loops -fno-tracer
   else
     $(error Unknown MODE: $(MODE))
   endif
