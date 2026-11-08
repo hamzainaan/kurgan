@@ -3,6 +3,9 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/hamzainaan/kurgan/releases/latest">
+    <img src="https://img.shields.io/github/v/release/hamzainaan/kurgan?label=release&logo=github&logoColor=white&style=flat-square" alt="Release">
+  </a>
   <a href="https://github.com/hamzainaan/kurgan/actions/workflows/build.yml">
     <img src="https://github.com/hamzainaan/kurgan/actions/workflows/build.yml/badge.svg?branch=main&event=push" alt="Build">
   </a>
