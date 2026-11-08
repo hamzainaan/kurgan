@@ -3,6 +3,7 @@
 #include "position.h"
 #include "stats.h"
 
+#include <bit>
 #include <cstring>
 
 #if defined(__AVX2__) || defined(__SSE4_1__)
@@ -319,6 +320,34 @@ namespace
         uint32_t generation = 0;
     };
 
+    constexpr uint32_t pieceMask()
+    {
+        uint32_t mask = 0;
+        for (int c = WHITE; c <= BLACK; ++c)
+            for (int pt = PAWN; pt <= KING; ++pt)
+                mask |= 1u << makePiece(static_cast<Color>(c), static_cast<PieceType>(pt));
+        return mask;
+    }
+
+    uint32_t changedPieces(const Bitboard *now, const Bitboard *cached)
+    {
+        uint32_t mask = 0;
+#if defined(__AVX2__)
+        static_assert(PIECE_NB % 4 == 0);
+        for (int q = 0; q < PIECE_NB; q += 4)
+        {
+            const __m256i a = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(now + q));
+            const __m256i b = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(cached + q));
+            const int equal = _mm256_movemask_pd(_mm256_castsi256_pd(_mm256_cmpeq_epi64(a, b)));
+            mask |= static_cast<uint32_t>(~equal & 0xF) << q;
+        }
+#else
+        for (int pc = 0; pc < PIECE_NB; ++pc)
+            mask |= static_cast<uint32_t>(now[pc] != cached[pc]) << pc;
+#endif
+        return mask & pieceMask();
+    }
+
     thread_local HalfCache halfCaches[COLOR_NB][64];
     thread_local Square lastKing[COLOR_NB] = {SQ_NONE, SQ_NONE};
 
@@ -347,24 +376,19 @@ namespace
         int addCount = 0;
         int subCount = 0;
 
-        for (int pieceColour = WHITE; pieceColour <= BLACK; ++pieceColour)
+        for (uint32_t mask = changedPieces(pos.byPiece.data(), cache.byPiece); mask; mask &= mask - 1)
         {
-            const int colourBase = base + (pieceColour == colour ? 0 : nnue::COLOUR_STRIDE);
-            for (int pt = PAWN; pt <= KING; ++pt)
-            {
-                const Piece pc = makePiece(static_cast<Color>(pieceColour), static_cast<PieceType>(pt));
-                const Bitboard now = pos.byPiece[pc];
-                const Bitboard changed = cache.byPiece[pc] ^ now;
-                if (!changed)
-                    continue;
-                cache.byPiece[pc] = now;
+            const Piece pc = static_cast<Piece>(std::countr_zero(mask));
+            const Bitboard now = pos.byPiece[pc];
+            const Bitboard changed = cache.byPiece[pc] ^ now;
+            cache.byPiece[pc] = now;
 
-                const int offset = colourBase + pt * nnue::PIECE_STRIDE;
-                for (Bitboard b = changed & now; b; b &= b - 1)
-                    adds[addCount++] = offset + (static_cast<int>(lsb(b)) ^ flip);
-                for (Bitboard b = changed & ~now; b; b &= b - 1)
-                    subs[subCount++] = offset + (static_cast<int>(lsb(b)) ^ flip);
-            }
+            const int offset = base + (colorOf(pc) == colour ? 0 : nnue::COLOUR_STRIDE)
+                             + typeOf(pc) * nnue::PIECE_STRIDE;
+            for (Bitboard b = changed & now; b; b &= b - 1)
+                adds[addCount++] = offset + (static_cast<int>(lsb(b)) ^ flip);
+            for (Bitboard b = changed & ~now; b; b &= b - 1)
+                subs[subCount++] = offset + (static_cast<int>(lsb(b)) ^ flip);
         }
 
         if (addCount + subCount)
