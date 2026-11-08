@@ -10,6 +10,10 @@ on:
       version:
         type: string
         required: true
+      ref:
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -48,7 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          ref: ${{ inputs.ref || github.event.pull_request.merge_commit_sha || github.sha }}
       - if: matrix.packages
         run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
       - run: make VERSION=${{ inputs.version || github.ref_type == 'tag' && github.ref_name || 'dev' }} -j"$(nproc)" MODE=release TIER=${{ matrix.tier }} CXX=${{ matrix.cxx }} CXXFLAGS=-static
@@ -85,7 +89,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          ref: ${{ inputs.ref || github.event.pull_request.merge_commit_sha || github.sha }}
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -122,7 +126,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          ref: ${{ inputs.ref || github.event.pull_request.merge_commit_sha || github.sha }}
       - run: make VERSION=${{ inputs.version || github.ref_type == 'tag' && github.ref_name || 'dev' }} -j"$(sysctl -n hw.ncpu)" MODE=release TIER=${{ matrix.tier }} LTO=${{ matrix.lto }} CXXFLAGS="${{ matrix.arch }} -mmacosx-version-min=11.0"
       - if: matrix.verify == 'exec'
         run: printf 'bench\nquit\n' | ./kurgan | grep -q "Nodes searched"
@@ -156,7 +160,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          ref: ${{ inputs.ref || github.event.pull_request.merge_commit_sha || github.sha }}
       - uses: android-actions/setup-android@v4
         with:
           packages: ''
