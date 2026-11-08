@@ -35,13 +35,26 @@ Maintained in the quiet hope that it stops losing to Stockfish. It will not.
 ## Features
 
 - Bitboards; magic bitboards for the sliders.
-- Alpha-beta, iterative deepening, aspiration windows.
-- Transposition table, killers, history, LMR, null move.
-- Assorted pruning: reverse futility, futility, SEE-based quiet pruning.
-- Lazy SMP, tapered evaluation.
+- Alpha-beta with PVS, iterative deepening, aspiration windows, quiescence search.
+- Transposition table: four-entry clusters per cache line, depth and age replacement, prefetching.
+- Move ordering: staged move picker, killers, counter moves, history, capture history,
+  continuation history one, two, four and six plies back.
+- Assorted pruning: reverse futility, razoring, null move, ProbCut, late move pruning, futility,
+  history and SEE-based quiet pruning, mate distance pruning.
+- LMR, internal iterative reduction, singular extensions (double and negative too), check extensions.
+- Static evaluation correction history keyed by pawn and non-pawn structure.
+- Lazy SMP with staggered helper depths.
 - Default NNUE evaluation (HCE optional): mirrored king-bucket HalfKA (24576
   inputs, 512-wide SCReLU hidden layer, 8 output buckets), trained with Bullet.
+  The net is embedded in the binary.
+- Tapered hand-crafted evaluation for when you turn the net off.
+- Endgame knowledge: a KPK bitbase, dedicated evaluations for the usual suspects (KBNK, KRKP, KQKR
+  and friends), and scaling rules for drawish endings.
+- Time management that spends less when the best move dominates the search and more when the
+  position is tactical or the score drops.
+- UCI extras: MultiPV, pondering, searchmoves, contempt, move overhead, analysis mode, refutations.
 - Perft and a deterministic benchmark.
+- Self-play data generation (`datagen`) in bulletformat, for training the next net.
 - FRC960 (Fischer Random).
 
 ## Build
