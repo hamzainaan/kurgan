@@ -1,7 +1,9 @@
 name: Build
 
 on:
-  push:
+  pull_request:
+    types: [closed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -9,6 +11,7 @@ permissions:
 
 jobs:
   linux:
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged
     runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
@@ -39,6 +42,8 @@ jobs:
             packages: g++-aarch64-linux-gnu
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
       - if: matrix.packages
         run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
       - run: make VERSION=${{ github.ref_type == 'tag' && github.ref_name || 'dev' }} -j"$(nproc)" MODE=release TIER=${{ matrix.tier }} CXX=${{ matrix.cxx }} CXXFLAGS=-static
@@ -52,6 +57,7 @@ jobs:
           if-no-files-found: error
 
   windows:
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged
     runs-on: windows-latest
     defaults:
       run:
@@ -73,6 +79,8 @@ jobs:
             tier: avx512
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -90,6 +98,7 @@ jobs:
           if-no-files-found: error
 
   macos:
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged
     runs-on: macos-26-intel
     strategy:
       fail-fast: false
@@ -107,6 +116,8 @@ jobs:
             verify: lipo
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
       - run: make VERSION=${{ github.ref_type == 'tag' && github.ref_name || 'dev' }} -j"$(sysctl -n hw.ncpu)" MODE=release TIER=${{ matrix.tier }} LTO=${{ matrix.lto }} CXXFLAGS="${{ matrix.arch }} -mmacosx-version-min=11.0"
       - if: matrix.verify == 'exec'
         run: printf 'bench\nquit\n' | ./kurgan | grep -q "Nodes searched"
@@ -120,6 +131,7 @@ jobs:
           if-no-files-found: error
 
   android:
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged
     runs-on: ubuntu-26.04
     env:
       NDK: 29.0.14206865
@@ -138,6 +150,8 @@ jobs:
             api: 24
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
       - uses: android-actions/setup-android@v4
         with:
           packages: ''
