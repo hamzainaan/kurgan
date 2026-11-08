@@ -53,10 +53,11 @@ endif
 
 # A variant change must relink because every variant writes the same binary name.
 VARIANT_STAMP := $(BUILD_DIR)/.variant-stamp
+LINK_VARIANT  := $(VARIANT) $(MODE)
 
-ifneq ($(VARIANT),$(shell cat $(VARIANT_STAMP) 2>/dev/null))
+ifneq ($(LINK_VARIANT),$(shell cat $(VARIANT_STAMP) 2>/dev/null))
   $(shell mkdir -p $(BUILD_DIR))
-  $(shell printf '%s' '$(VARIANT)' > $(VARIANT_STAMP))
+  $(shell printf '%s' '$(LINK_VARIANT)' > $(VARIANT_STAMP))
 endif
 
 UNAME_S := $(shell uname -s 2>/dev/null || echo Windows)
