@@ -7,13 +7,7 @@
     <img src="https://img.shields.io/github/v/release/hamzainaan/kurgan?label=release&logo=github&logoColor=white&style=flat-square" alt="Release">
   </a>
   <a href="https://github.com/hamzainaan/kurgan/actions/workflows/build.yml">
-    <img src="https://github.com/hamzainaan/kurgan/actions/workflows/build.yml/badge.svg?branch=main&event=push" alt="Build">
-  </a>
-  <a href="https://github.com/hamzainaan/kurgan/actions/workflows/build.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/hamzainaan/kurgan/build.yml?branch=main&event=push&label=CI&logo=githubactions&logoColor=white&style=flat-square" alt="CI">
-  </a>
-  <a href="https://github.com/hamzainaan/kurgan/actions/workflows/build.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/hamzainaan/kurgan/build.yml?branch=main&label=main&logo=git&logoColor=white&style=flat-square" alt="main build">
+    <img src="https://img.shields.io/github/actions/workflow/status/hamzainaan/kurgan/build.yml?event=pull_request&label=build&logo=githubactions&logoColor=white&style=flat-square" alt="Build">
   </a>
 </p>
 
