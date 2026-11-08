@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - id: next
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tags=$(gh api --paginate "repos/$GITHUB_REPOSITORY/tags" --jq '.[].name')
+          last=$(printf '%s\n' "$tags" | grep -E '^[0-9]+$' | sort -n | tail -n 1 || true)
+          echo "version=$(( ${last:-0} + 1 ))" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+      - working-directory: artifacts
+        run: |
+          for dir in */; do
+            name=${dir%/}
+            chmod +x "$name"/*
+            (cd "$name" && zip -9 -q "../$name.zip" *)
+          done
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          gh release create "$VERSION" artifacts/*.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Kurgan $VERSION" \
+            --generate-notes \
+            --latest
