@@ -59,13 +59,17 @@ Maintained in the quiet hope that it stops losing to Stockfish. It will not.
 
 ## Build
 
-Needs a C++23 compiler.
+Needs a C++23 compiler, g++ or clang++. The net is linked into the binary with `.incbin`, so MSVC is out; on Windows, MSYS2 with MinGW g++ works.
 
 ```
 make
 ```
 
-Debug with `make MODE=debug`. PGO, if you insist: `make MODE=profile-gen && make bench && make MODE=profile-use`.
+That builds for the CPU you are sitting at (`TIER=native`). For a binary that has to run somewhere else, pick a tier: `make TIER=avx2`. The tiers are `baseline`, `sse42`, `avx2`, `avx512`, `neoverse` (ARM servers) and `apple` (Apple Silicon).
+
+Debug with `make MODE=debug`. PGO, if you insist: `make MODE=profile-gen bench && make MODE=profile-use`. `VERSION=3` sets the name the engine reports, and `make clean` throws everything away.
+
+Prebuilt binaries for Linux, Windows, macOS and Android are on the [releases page](https://github.com/hamzainaan/kurgan/releases).
 
 ## Usage
 
