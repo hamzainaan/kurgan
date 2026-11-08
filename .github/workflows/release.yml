@@ -2,6 +2,15 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit on main that passed the release match
+        required: true
+        type: string
+      strength:
+        description: Release match result sent by kurgan-bench
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -11,35 +20,63 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  version:
+  prepare:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     outputs:
-      version: ${{ steps.next.outputs.version }}
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - id: next
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: version
         env:
-          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+          STRENGTH: ${{ inputs.strength }}
         run: |
-          tags=$(gh api --paginate "repos/$GITHUB_REPOSITORY/tags" --jq '.[].name')
-          last=$(printf '%s\n' "$tags" | grep -E '^[0-9]+$' | sort -n | tail -n 1 || true)
-          echo "version=$(( ${last:-0} + 1 ))" >> "$GITHUB_OUTPUT"
+          if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::sha must be a full commit hash"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::the commit is not on main"
+            exit 1
+          fi
+          tags=$(git tag --list)
+          previous=$(printf '%s\n' "$tags" | grep -E '^[0-9]+$' | sort -n | tail -n 1 || true)
+          if [ -z "$previous" ]; then
+            echo "::error::no previous release tag"
+            exit 1
+          fi
+          python3 -I .github/scripts/release_notes.py --previous "$previous" --sha "$SHA" --strength "$STRENGTH" --output notes.md
+          echo "version=$((previous + 1))" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: release-notes
+          path: notes.md
+          if-no-files-found: error
 
   build:
-    needs: version
+    needs: prepare
     uses: ./.github/workflows/build.yml
     with:
-      version: ${{ needs.version.outputs.version }}
+      version: ${{ needs.prepare.outputs.version }}
+      ref: ${{ inputs.sha }}
 
   publish:
-    needs: [version, build]
+    needs: [prepare, build]
     runs-on: ubuntu-26.04
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v7
         with:
+          pattern: kurgan-*
           path: artifacts
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-notes
+          path: notes
       - working-directory: artifacts
         run: |
           for dir in */; do
@@ -49,11 +86,12 @@ jobs:
           done
       - env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.version.outputs.version }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SHA: ${{ inputs.sha }}
         run: |
           gh release create "$VERSION" artifacts/*.zip \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
+            --target "$SHA" \
             --title "Kurgan $VERSION" \
-            --generate-notes \
+            --notes-file notes/notes.md \
             --latest
