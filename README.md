@@ -11,6 +11,21 @@
   </a>
 </p>
 
+<p align="center">
+  <a href="https://lichess.org/@/KurganUCI/perf/bullet">
+    <img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Flichess.org%2Fapi%2Fuser%2FKurganUCI&query=%24.perfs.bullet.rating&label=bullet&logo=lichess&logoColor=white&color=informational&style=flat-square" alt="Lichess bullet rating">
+  </a>
+  <a href="https://lichess.org/@/KurganUCI/perf/blitz">
+    <img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Flichess.org%2Fapi%2Fuser%2FKurganUCI&query=%24.perfs.blitz.rating&label=blitz&logo=lichess&logoColor=white&color=informational&style=flat-square" alt="Lichess blitz rating">
+  </a>
+  <a href="https://lichess.org/@/KurganUCI/perf/rapid">
+    <img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Flichess.org%2Fapi%2Fuser%2FKurganUCI&query=%24.perfs.rapid.rating&label=rapid&logo=lichess&logoColor=white&color=informational&style=flat-square" alt="Lichess rapid rating">
+  </a>
+  <a href="https://lichess.org/@/KurganUCI/perf/chess960">
+    <img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Flichess.org%2Fapi%2Fuser%2FKurganUCI&query=%24.perfs.chess960.rating&label=chess960&logo=lichess&logoColor=white&color=informational&style=flat-square" alt="Lichess chess960 rating">
+  </a>
+</p>
+
 # Kurgan
 
 A UCI chess engine, written in C++23, mostly to see whether I could. Turns out I could, eventually.
