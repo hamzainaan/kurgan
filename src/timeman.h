@@ -25,6 +25,7 @@ namespace manager
 
     // True when a clock budget limits the search
     bool budgeted();
+    int64_t optimumMs();
     int64_t elapsedMs(); // Milliseconds since the search started
     void rootFailing(bool failing); // Marks whether the root currently fails low
 

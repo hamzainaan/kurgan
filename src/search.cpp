@@ -2,6 +2,7 @@
 
 #include "endgame.h"
 #include "evaluate.h"
+#include "instant.h"
 #include "see.h"
 #include "stats.h"
 #include "timeman.h"
@@ -1860,6 +1861,62 @@ namespace
         return static_cast<double>(rootMoveNodes[m.from()][m.to()]) / static_cast<double>(rootNodesTotal);
     }
 
+    constexpr int INSTANT_FORCED_DEPTH = 8;
+    constexpr int INSTANT_RECAPTURE_DEPTH = 10;
+    constexpr int INSTANT_STABLE_ITERATIONS = 2;
+    constexpr int INSTANT_MARGIN = INTERNAL_PAWN * 3 / 2;
+    constexpr int INSTANT_MAX_DROP = INTERNAL_PAWN / 4;
+    constexpr double INSTANT_TIME_SHARE = 0.25;
+
+    bool instantAllowed()
+    {
+        return instant::enabled() && !analyseMode && multiPVSetting == 1 && mateGoal == 0 && activeLimits.depth == 0
+               && activeLimits.nodes == 0 && activeLimits.softNodes == 0 && manager::budgeted();
+    }
+
+    bool alternativesFailBelow(Position &pos, int depth, Move best, int beta)
+    {
+        const int savedMultiPV = currentMultiPV;
+        const bool savedRefutation = refutationSent;
+        currentMultiPV = 0;
+        refutationSent = true;
+        excludedStack[0] = best;
+        const int score = alphaBeta(pos, depth / 2 + 2, beta - 1, beta, 0, false, false);
+        excludedStack[0] = Move();
+        pvLength[0] = 0;
+        currentMultiPV = savedMultiPV;
+        refutationSent = savedRefutation;
+        return !stopFlag.load(std::memory_order_relaxed) && score < beta;
+    }
+
+    bool playsInstantly(Position &pos, int depth, Move best, int score, int scoreDrop, int stableIterations)
+    {
+        const instant::Kind kind = instant::kind();
+        if (kind == instant::Kind::NONE || !instantAllowed() || !instant::isCandidate(best))
+            return false;
+
+        if (kind == instant::Kind::FORCED)
+            return depth >= INSTANT_FORCED_DEPTH;
+
+        if (depth < INSTANT_RECAPTURE_DEPTH || stableIterations < INSTANT_STABLE_ITERATIONS
+            || scoreDrop > INSTANT_MAX_DROP || score >= MATE_THRESHOLD || score <= -MATE_THRESHOLD)
+            return false;
+
+        const double share = static_cast<double>(manager::optimumMs()) * INSTANT_TIME_SHARE;
+        if (static_cast<double>(manager::elapsedMs()) > share)
+            return false;
+
+        return alternativesFailBelow(pos, depth, best, score - INSTANT_MARGIN);
+    }
+
+    void reportInstant(instant::Kind kind)
+    {
+        if (silentOutput)
+            return;
+        std::lock_guard<std::mutex> lock(outputMutex);
+        std::cout << "info string instant " << (kind == instant::Kind::FORCED ? "forced" : "recapture") << std::endl;
+    }
+
     // Sorts MultiPV lines by score and keeps ties in search order
     void sortRootLines(RootLine *lines, int lineCount)
     {
@@ -2040,7 +2097,12 @@ namespace
 
                 manager::observe(previousScore, scoreDrop, stableIterations, rootMoveEffort(iterationBest));
 
-                if (manager::budgeted()
+                if (lineCount > 0 && playsInstantly(pos, depth, iterationBest, previousScore, scoreDrop, stableIterations))
+                {
+                    reportInstant(instant::kind());
+                    stopFlag.store(true, std::memory_order_relaxed);
+                }
+                else if (manager::budgeted()
                     && manager::shouldStop(pos, previousScore, scoreDrop, stableIterations, depth,
                                            manager::elapsedMs() - iterationStart))
                     stopFlag.store(true, std::memory_order_relaxed);
@@ -2141,6 +2203,7 @@ void search::prepare(const Position &root, const SearchLimits &limits)
     ponderHitFlag.store(false, std::memory_order_relaxed);
     stopRequested.store(false, std::memory_order_relaxed);
     stopFlag.store(false, std::memory_order_relaxed);
+    instant::classify(root, limits.previousMove, limits.previousVictim, !activeLimits.searchmoves.empty());
     manager::analyzeRoot(root, static_cast<int>(activeLimits.searchmoves.size()));
     manager::computeDeadline(limits, root.sideToMove);
     searching.store(true, std::memory_order_relaxed);
