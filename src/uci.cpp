@@ -3,6 +3,7 @@
 #include "bench.h"
 #include "datagen.h"
 #include "evaluate.h"
+#include "instant.h"
 #include "movegen.h"
 #include "nnue.h"
 #include "perft.h"
@@ -352,6 +353,7 @@ namespace
         std::cout << "option name UCI_Opponent type string default <empty>" << std::endl;
         std::cout << "option name Use NNUE type check default true" << std::endl;
         std::cout << "option name Search Stats type check default false" << std::endl;
+        std::cout << "option name Instant Moves type check default true" << std::endl;
         if (nnue::loaded())
             std::cout << "info string evaluation nnue (" << nnue::file() << ") id " << std::hex
                       << nnue::hash() << std::dec << std::endl;
@@ -427,6 +429,8 @@ namespace
                 nnue::setEnabled(checkValue(value));
             else if (key == "search stats")
                 stats::setReporting(checkValue(value));
+            else if (key == "instant moves")
+                instant::setEnabled(checkValue(value));
             else if (!search::setTuningOption(name, std::stoi(value)))
                 std::cout << "info string unknown option " << name << std::endl;
         }
