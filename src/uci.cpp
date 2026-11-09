@@ -26,6 +26,8 @@
 namespace
 {
     bool debugMode = false;
+    Move previousMove{};
+    PieceType previousVictim = NO_PIECE_TYPE;
 
     std::string asciiLower(std::string text)
     {
@@ -154,6 +156,9 @@ namespace
         std::string token;
         ss >> token;
 
+        previousMove = Move();
+        previousVictim = NO_PIECE_TYPE;
+
         if (token == "startpos")
         {
             pos.setFen(START_FEN);
@@ -211,11 +216,16 @@ namespace
                     std::cout << "info string invalid move '" << moveStr << '\'' << std::endl;
                     break;
                 }
+                const Piece victim = m.isEnPassant() ? makePiece(static_cast<Color>(pos.sideToMove ^ 1), PAWN)
+                                     : m.isCastling() ? NO_PIECE
+                                                      : pos.board[m.to()];
                 if (!pos.doMove(m))
                 {
                     std::cout << "info string illegal move '" << moveStr << '\'' << std::endl;
                     break;
                 }
+                previousMove = m;
+                previousVictim = victim == NO_PIECE ? NO_PIECE_TYPE : typeOf(victim);
             }
         }
     }
@@ -282,6 +292,8 @@ namespace
         if (requestedSearchMoves > 0 && limits.searchmoves.empty())
             std::cout << "info string no legal searchmoves, searching all moves" << std::endl;
 
+        limits.previousMove = previousMove;
+        limits.previousVictim = previousVictim;
         return limits;
     }
 
