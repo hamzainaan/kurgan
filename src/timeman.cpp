@@ -371,6 +371,11 @@ namespace manager
         return baseOptimumMs.load(std::memory_order_relaxed) > 0;
     }
 
+    int64_t optimumMs()
+    {
+        return baseOptimumMs.load(std::memory_order_relaxed);
+    }
+
     int64_t elapsedMs()
     {
         const Clock::time_point start{Clock::duration{startRep.load(std::memory_order_relaxed)}};

@@ -52,6 +52,8 @@ Maintained in the quiet hope that it stops losing to Stockfish. It will not.
   and friends), and scaling rules for drawish endings.
 - Time management that spends less when the best move dominates the search and more when the
   position is tactical or the score drops.
+- Instant moves: a forced reply, or a recapture that a verification search confirms beats every
+  alternative by a wide margin, is played at once like a human would (`Instant Moves` option).
 - UCI extras: MultiPV, pondering, searchmoves, contempt, move overhead, analysis mode, refutations.
 - Perft and a deterministic benchmark.
 - Self-play data generation (`datagen`) in bulletformat, for training the next net.

@@ -27,6 +27,8 @@ namespace search
         bool ponder = false;
         bool infinite = false; // Keeps searching until stop is called.
         std::vector<Move> searchmoves; // Restricts the search to these root moves.
+        Move previousMove{};
+        PieceType previousVictim = NO_PIECE_TYPE;
     };
 
     // Initializes attack tables and allocates the transposition table.

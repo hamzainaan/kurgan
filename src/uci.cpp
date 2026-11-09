@@ -3,6 +3,7 @@
 #include "bench.h"
 #include "datagen.h"
 #include "evaluate.h"
+#include "instant.h"
 #include "movegen.h"
 #include "nnue.h"
 #include "perft.h"
@@ -26,6 +27,8 @@
 namespace
 {
     bool debugMode = false;
+    Move previousMove{};
+    PieceType previousVictim = NO_PIECE_TYPE;
 
     std::string asciiLower(std::string text)
     {
@@ -154,6 +157,9 @@ namespace
         std::string token;
         ss >> token;
 
+        previousMove = Move();
+        previousVictim = NO_PIECE_TYPE;
+
         if (token == "startpos")
         {
             pos.setFen(START_FEN);
@@ -211,11 +217,16 @@ namespace
                     std::cout << "info string invalid move '" << moveStr << '\'' << std::endl;
                     break;
                 }
+                const Piece victim = m.isEnPassant() ? makePiece(static_cast<Color>(pos.sideToMove ^ 1), PAWN)
+                                     : m.isCastling() ? NO_PIECE
+                                                      : pos.board[m.to()];
                 if (!pos.doMove(m))
                 {
                     std::cout << "info string illegal move '" << moveStr << '\'' << std::endl;
                     break;
                 }
+                previousMove = m;
+                previousVictim = victim == NO_PIECE ? NO_PIECE_TYPE : typeOf(victim);
             }
         }
     }
@@ -282,6 +293,8 @@ namespace
         if (requestedSearchMoves > 0 && limits.searchmoves.empty())
             std::cout << "info string no legal searchmoves, searching all moves" << std::endl;
 
+        limits.previousMove = previousMove;
+        limits.previousVictim = previousVictim;
         return limits;
     }
 
@@ -340,6 +353,7 @@ namespace
         std::cout << "option name UCI_Opponent type string default <empty>" << std::endl;
         std::cout << "option name Use NNUE type check default true" << std::endl;
         std::cout << "option name Search Stats type check default false" << std::endl;
+        std::cout << "option name Instant Moves type check default true" << std::endl;
         if (nnue::loaded())
             std::cout << "info string evaluation nnue (" << nnue::file() << ") id " << std::hex
                       << nnue::hash() << std::dec << std::endl;
@@ -415,6 +429,8 @@ namespace
                 nnue::setEnabled(checkValue(value));
             else if (key == "search stats")
                 stats::setReporting(checkValue(value));
+            else if (key == "instant moves")
+                instant::setEnabled(checkValue(value));
             else if (!search::setTuningOption(name, std::stoi(value)))
                 std::cout << "info string unknown option " << name << std::endl;
         }
