@@ -63,15 +63,12 @@ void bench::run(int depth)
         const uint64_t n = search::totalNodes();
         totalNodes += n;
 
-        std::cout << "info string bench " << (i + 1) << '/' << count
-                  << " fen " << POSITIONS[i]
-                  << " bestmove " << moveToUci(search::bestMove())
-                  << " nodes " << n << std::endl;
+        std::cout << "info string bench " << (i + 1) << '/' << count << " fen " << POSITIONS[i] << " bestmove "
+                  << moveToUci(search::bestMove()) << " nodes " << n << std::endl;
     }
 
-    const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                             std::chrono::steady_clock::now() - start)
-                             .count();
+    const long long ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
 
     search::setSilent(false);
     search::setThreads(savedThreads);
