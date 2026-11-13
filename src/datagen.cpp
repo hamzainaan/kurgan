@@ -243,12 +243,11 @@ namespace
         const double elapsed = std::chrono::duration<double>(Clock::now() - start).count();
         const double rate = elapsed > 0.0 ? static_cast<double>(done) / elapsed : 0.0;
         const uint64_t left = done < target ? target - done : 0;
-        std::cout << "info string datagen positions " << done << '/' << target
-                  << " (" << (target > 0 ? 100 * done / target : 100) << "%)"
+        std::cout << "info string datagen positions " << done << '/' << target << " ("
+                  << (target > 0 ? 100 * done / target : 100) << "%)"
                   << " rate " << static_cast<uint64_t>(rate) << " pos/s"
-                  << " elapsed " << duration(static_cast<int64_t>(elapsed))
-                  << " eta " << (rate > 0.0 ? duration(static_cast<int64_t>(static_cast<double>(left) / rate)) : "-")
-                  << std::endl;
+                  << " elapsed " << duration(static_cast<int64_t>(elapsed)) << " eta "
+                  << (rate > 0.0 ? duration(static_cast<int64_t>(static_cast<double>(left) / rate)) : "-") << std::endl;
     }
 
     // Appends games to one file until the worker target is reached
@@ -343,8 +342,8 @@ namespace
                                      .string());
         }
 
-        plan.perWorker = (options.positions + static_cast<uint64_t>(options.workers) - 1)
-                         / static_cast<uint64_t>(options.workers);
+        plan.perWorker =
+            (options.positions + static_cast<uint64_t>(options.workers) - 1) / static_cast<uint64_t>(options.workers);
         plan.target = plan.perWorker * static_cast<uint64_t>(options.workers);
         plan.base = recordsIn(plan.paths);
         return plan;
@@ -372,7 +371,8 @@ namespace
             const pid_t pid = fork();
             if (pid == 0)
             {
-                work(options, plan.perWorker, plan.seeds[static_cast<size_t>(i)], plan.paths[static_cast<size_t>(i)], false);
+                work(options, plan.perWorker, plan.seeds[static_cast<size_t>(i)], plan.paths[static_cast<size_t>(i)],
+                     false);
                 _exit(0);
             }
             if (pid < 0)
@@ -423,11 +423,10 @@ void datagen::run(const Options &requested)
     const std::string tag = netTag();
     const WorkPlan plan = planWork(options, tag);
 
-    std::cout << "info string datagen net " << tag << " workers " << options.workers
-              << " positions " << plan.target << " softnodes " << options.softNodes
-              << " hardnodes " << options.hardNodes << " randomplies " << options.randomPlies
-              << " hash " << options.hash << " seed " << options.seed
-              << " out " << options.out << std::endl;
+    std::cout << "info string datagen net " << tag << " workers " << options.workers << " positions " << plan.target
+              << " softnodes " << options.softNodes << " hardnodes " << options.hardNodes << " randomplies "
+              << options.randomPlies << " hash " << options.hash << " seed " << options.seed << " out " << options.out
+              << std::endl;
 
     const Clock::time_point start = Clock::now();
     runWorkers(options, plan, start);
