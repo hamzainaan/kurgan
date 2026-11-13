@@ -13,8 +13,8 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
-#include <ctime>
 #include <cstring>
+#include <ctime>
 #include <iostream>
 #include <mutex>
 #include <new>
@@ -217,7 +217,8 @@ namespace
     {
         for (int d = 1; d < MAX_DEPTH; ++d)
             for (int m = 1; m < 64; ++m)
-                lmrTable[d][m] = static_cast<int>(tuned::LMR_BASE / 100.0 + std::log(d) * std::log(m) * 100.0 / tuned::LMR_DIVISOR);
+                lmrTable[d][m] =
+                    static_cast<int>(tuned::LMR_BASE / 100.0 + std::log(d) * std::log(m) * 100.0 / tuned::LMR_DIVISOR);
     }
 
     int hardwareThreads()
@@ -241,8 +242,8 @@ namespace
             return true;
 
         // Two knights cannot force mate against a lone king.
-        if (knights == 2 && bishops == 0 &&
-            (popCount(minors & pos.byColor[WHITE]) == 2 || popCount(minors & pos.byColor[BLACK]) == 2))
+        if (knights == 2 && bishops == 0
+            && (popCount(minors & pos.byColor[WHITE]) == 2 || popCount(minors & pos.byColor[BLACK]) == 2))
             return true;
 
         // Bishops confined to one color complex cannot mate.
@@ -295,8 +296,7 @@ namespace
     // Returns the captured piece, treating en passant as a pawn capture.
     Piece victimOf(const Position &pos, Move m)
     {
-        return m.isEnPassant() ? makePiece(static_cast<Color>(pos.sideToMove ^ 1), PAWN)
-                               : pos.board[m.to()];
+        return m.isEnPassant() ? makePiece(static_cast<Color>(pos.sideToMove ^ 1), PAWN) : pos.board[m.to()];
     }
 
     // Checks whether a move gives direct or discovered check
@@ -325,12 +325,13 @@ namespace
         }
 
         const Bitboard kbb = 1ULL << ksq;
-        if (pt == PAWN ? (movegen::pawnAttacksFrom(us, to) & kbb) != 0 : pt != KING && (movegen::attacks(pt, to, occ) & kbb) != 0)
+        if (pt == PAWN ? (movegen::pawnAttacksFrom(us, to) & kbb) != 0
+                       : pt != KING && (movegen::attacks(pt, to, occ) & kbb) != 0)
             return true;
 
         const Bitboard ours = pos.byColor[us] & occ & ~(1ULL << m.to());
-        return (movegen::attacks(BISHOP, ksq, occ) & ours & (pos.byType[BISHOP] | pos.byType[QUEEN])) != 0 ||
-               (movegen::attacks(ROOK, ksq, occ) & ours & (pos.byType[ROOK] | pos.byType[QUEEN])) != 0;
+        return (movegen::attacks(BISHOP, ksq, occ) & ours & (pos.byType[BISHOP] | pos.byType[QUEEN])) != 0
+               || (movegen::attacks(ROOK, ksq, occ) & ours & (pos.byType[ROOK] | pos.byType[QUEEN])) != 0;
     }
 
     // Checking squares and discovered check candidates cached per node
@@ -366,8 +367,8 @@ namespace
             while (snipers)
             {
                 const Square s = popLsb(snipers);
-                const Bitboard between = movegen::attacks(slider, ksq, 1ULL << s)
-                                         & movegen::attacks(slider, s, kingBit) & occ;
+                const Bitboard between =
+                    movegen::attacks(slider, ksq, 1ULL << s) & movegen::attacks(slider, s, kingBit) & occ;
                 if (between && !(between & (between - 1)) && (between & ours))
                     ci.discoverers |= between;
             }
@@ -490,7 +491,8 @@ namespace
 
     int16_t &nonPawnCorrEntry(const Position &pos, Color c)
     {
-        return nonPawnCorr[(static_cast<size_t>(c) * COLOR_NB + pos.sideToMove) * CORR_NB + (pos.nonPawnKey[c] & (CORR_NB - 1))];
+        return nonPawnCorr[(static_cast<size_t>(c) * COLOR_NB + pos.sideToMove) * CORR_NB
+                           + (pos.nonPawnKey[c] & (CORR_NB - 1))];
     }
 
     // Applies the correction history to a raw evaluation
@@ -525,11 +527,10 @@ namespace
         {
             const int back = ply + 1 - CONT_DISTANCE[i];
             const Piece piece = back < 0 ? NO_PIECE : movedPieceStack[back];
-            contRows[i][ply] = piece == NO_PIECE
-                                   ? nullptr
-                                   : &contHistory[(static_cast<size_t>(i) * PIECE_TO_NB +
-                                                   pieceToIndex(piece, moveTarget(moveStack[back]))) *
-                                                  PIECE_TO_NB];
+            contRows[i][ply] = piece == NO_PIECE ? nullptr
+                                                 : &contHistory[(static_cast<size_t>(i) * PIECE_TO_NB
+                                                                 + pieceToIndex(piece, moveTarget(moveStack[back])))
+                                                                * PIECE_TO_NB];
         }
     }
 
@@ -542,9 +543,7 @@ namespace
         const int16_t *pawnRow;
         const int16_t *contRow[CONT_PLIES];
 
-        QuietHistory(const Position &pos, int ply)
-            : mainRows(history[pos.sideToMove]),
-              pawnRow(pawnHistoryRow(pos))
+        QuietHistory(const Position &pos, int ply) : mainRows(history[pos.sideToMove]), pawnRow(pawnHistoryRow(pos))
         {
             for (int i = 0; i < CONT_PLIES; ++i)
                 contRow[i] = contRows[i][ply] != nullptr ? contRows[i][ply] : EMPTY_CONT_ROW;
@@ -558,15 +557,12 @@ namespace
             for (int i = 0; i < CONT_PLIES; ++i)
                 cont += CONT_WEIGHT[i] * contRow[i][pieceTo];
 
-            return mainRows[m.from()][to] + CONT_SCALE * (cont / CONT_WEIGHT_SUM) / 100 +
-                   PAWN_SCALE * pawnRow[pieceTo] / 100;
+            return mainRows[m.from()][to] + CONT_SCALE * (cont / CONT_WEIGHT_SUM) / 100
+                   + PAWN_SCALE * pawnRow[pieceTo] / 100;
         }
     };
 
-    int quietHistoryScore(const Position &pos, Move m, int ply)
-    {
-        return QuietHistory(pos, ply).score(pos, m);
-    }
+    int quietHistoryScore(const Position &pos, Move m, int ply) { return QuietHistory(pos, ply).score(pos, m); }
 
     struct ScoredMove
     {
@@ -614,8 +610,8 @@ namespace
         bool tacticalScored = false;
         bool quietsScored = false;
 
-        void init(const Position &pos, const MoveList &list, Move ttBest, Move counterMove,
-                  int plyIndex, bool capturesOnly)
+        void init(const Position &pos, const MoveList &list, Move ttBest, Move counterMove, int plyIndex,
+                  bool capturesOnly)
         {
             source = &list;
             counter = counterMove;
@@ -831,8 +827,8 @@ namespace
     }
 
     // Caller holds outputMutex; a whole MultiPV set must be emitted together.
-    void printInfoLocked(int depth, int score, uint64_t nodeCount, long long elapsedMs, const Move *pv, int pvLen, int mpv,
-                         bool lowerBound = false)
+    void printInfoLocked(int depth, int score, uint64_t nodeCount, long long elapsedMs, const Move *pv, int pvLen,
+                         int mpv, bool lowerBound = false)
     {
         std::cout << "info depth " << depth << " seldepth " << seldepth << " multipv " << mpv;
 
@@ -867,7 +863,8 @@ namespace
     }
 
     // Prints one info line when output is enabled
-    void printInfo(int depth, int score, uint64_t nodeCount, long long elapsedMs, const Move *pv, int pvLen, int mpv = 1)
+    void printInfo(int depth, int score, uint64_t nodeCount, long long elapsedMs, const Move *pv, int pvLen,
+                   int mpv = 1)
     {
         if (silentOutput)
             return;
@@ -975,15 +972,12 @@ namespace
     }
 
     // History bonus that grows with depth up to a cap
-    int historyBonus(int depth)
-    {
-        return std::min(tuned::HIST_BONUS_MUL * depth * depth, tuned::HIST_BONUS_MAX);
-    }
+    int historyBonus(int depth) { return std::min(tuned::HIST_BONUS_MUL * depth * depth, tuned::HIST_BONUS_MAX); }
 
     // Rewards the cutoff move and penalizes the moves searched before it
     void updateCutoffHistories(const Position &pos, Move m, Move prevMove, int depth, int ply, bool quiet,
-                               const Move *searchedQuiets, int searchedQuietCount,
-                               const Move *searchedCaptures, int searchedCaptureCount)
+                               const Move *searchedQuiets, int searchedQuietCount, const Move *searchedCaptures,
+                               int searchedCaptureCount)
     {
         const Color us = pos.sideToMove;
         const int bonus = historyBonus(depth);
@@ -1067,8 +1061,9 @@ namespace
         const Move prevMove = moveStack[ply];
         const Move counter = prevMove == Move() ? Move() : counterMoveEntry(us, prevMove);
 
-        if (ply > 0 && ((pos.halfmoveClock >= 100 && !isCheckmated(pos)) || isInsufficientMaterial(pos)
-                        || pos.isRepetition(ply)))
+        if (ply > 0
+            && ((pos.halfmoveClock >= 100 && !isCheckmated(pos)) || isInsufficientMaterial(pos)
+                || pos.isRepetition(ply)))
             return drawScore(pos) + DRAW_JITTER - static_cast<int>(nodes & 2);
 
         const tt::Entry *tte = excluded == Move() ? tt::probe(key) : nullptr;
@@ -1087,8 +1082,7 @@ namespace
             ttEval = tte->eval;
 
             const bool mate = ttScore >= MATE_THRESHOLD || ttScore <= -MATE_THRESHOLD;
-            if (ttBound == BOUND_EXACT && ply > 0 && mate
-                && (!pvNode || hasMateProof(pos, ply, ttScore)))
+            if (ttBound == BOUND_EXACT && ply > 0 && mate && (!pvNode || hasMateProof(pos, ply, ttScore)))
             {
                 ++stats::current().ttCutoffs;
                 return ttScore;
@@ -1096,8 +1090,7 @@ namespace
 
             if (ttDepth >= depth && !pvNode)
             {
-                if (ttBound == BOUND_EXACT
-                    || (ttBound == BOUND_LOWER && ttScore >= beta)
+                if (ttBound == BOUND_EXACT || (ttBound == BOUND_LOWER && ttScore >= beta)
                     || (ttBound == BOUND_UPPER && ttScore <= alpha))
                 {
                     ++stats::current().ttCutoffs;
@@ -1128,18 +1121,18 @@ namespace
 
         int eval = staticEval;
         if (!inCheck && ttHit && ttScore > -MATE_THRESHOLD && ttScore < MATE_THRESHOLD
-            && (ttBound == BOUND_EXACT || (ttBound == BOUND_LOWER && ttScore > eval) || (ttBound == BOUND_UPPER && ttScore < eval)))
+            && (ttBound == BOUND_EXACT || (ttBound == BOUND_LOWER && ttScore > eval)
+                || (ttBound == BOUND_UPPER && ttScore < eval)))
             eval = ttScore;
 
         const int pastEval = ply >= 2 && staticEvalStack[ply - 2] != NO_EVAL ? staticEvalStack[ply - 2]
-                             : ply >= 4                                     ? staticEvalStack[ply - 4]
-                                                                            : NO_EVAL;
+                             : ply >= 4                                      ? staticEvalStack[ply - 4]
+                                                                             : NO_EVAL;
         const bool improving = !inCheck && pastEval != NO_EVAL && staticEval > pastEval;
         const bool mateWindow = beta >= MATE_THRESHOLD || beta <= -MATE_THRESHOLD;
         const bool shallowSearch = rootDepth <= FULL_WIDTH_DEPTH;
 
-        const Bitboard nonPawnPieces = pos.byType[KNIGHT] | pos.byType[BISHOP] |
-                                       pos.byType[ROOK] | pos.byType[QUEEN];
+        const Bitboard nonPawnPieces = pos.byType[KNIGHT] | pos.byType[BISHOP] | pos.byType[ROOK] | pos.byType[QUEEN];
         const bool hasNonPawn = (nonPawnPieces & pos.byColor[us]) != 0;
 
         if (!pvNode && !inCheck && !mateWindow && !shallowSearch)
@@ -1164,19 +1157,20 @@ namespace
         }
 
         // Null move pruning gives the opponent a free move and checks that beta still holds
-        const bool nmpGate = !pvNode && !inNullVerification && !inCheck && !mateWindow && excluded == Move() &&
-                             prevMove != Move() && depth >= tuned::NMP_MIN_DEPTH && hasNonPawn;
+        const bool nmpGate = !pvNode && !inNullVerification && !inCheck && !mateWindow && excluded == Move()
+                             && prevMove != Move() && depth >= tuned::NMP_MIN_DEPTH && hasNonPawn;
         if (nmpGate)
             ++stats::current().nmpEligible;
         if (nmpGate && eval >= beta && staticEval >= beta)
         {
-            int nullReduction = tuned::NMP_BASE + depth / tuned::NMP_DEPTH_DIV +
-                                std::min(2, (eval - beta) / tuned::NMP_EVAL_DIV);
+            int nullReduction =
+                tuned::NMP_BASE + depth / tuned::NMP_DEPTH_DIV + std::min(2, (eval - beta) / tuned::NMP_EVAL_DIV);
             nullReduction = std::min(nullReduction, depth - 1);
 
             moveStack[ply + 1] = Move();
             pos.doNullMove();
-            const int nullScore = -alphaBeta(pos, depth - 1 - nullReduction, -beta, -beta + 1, ply + 1, false, !cutNode);
+            const int nullScore =
+                -alphaBeta(pos, depth - 1 - nullReduction, -beta, -beta + 1, ply + 1, false, !cutNode);
             pos.undoNullMove();
 
             if (stopFlag.load(std::memory_order_relaxed))
@@ -1208,8 +1202,8 @@ namespace
 
         // ProbCut follows the Xiphos implementation.
         const int probcutBeta = beta + tuned::PROBCUT_MARGIN;
-        if (!pvNode && !inCheck && !mateWindow && excluded == Move() && depth >= tuned::PROBCUT_DEPTH &&
-            probcutBeta < MATE_THRESHOLD && !(ttHit && ttDepth >= depth - 3 && ttScore < probcutBeta))
+        if (!pvNode && !inCheck && !mateWindow && excluded == Move() && depth >= tuned::PROBCUT_DEPTH
+            && probcutBeta < MATE_THRESHOLD && !(ttHit && ttDepth >= depth - 3 && ttScore < probcutBeta))
         {
             ++stats::current().probcutEligible;
 
@@ -1226,8 +1220,8 @@ namespace
                 moveStack[ply + 1] = m;
                 int score = -quiescence(pos, -probcutBeta, -probcutBeta + 1, ply + 1);
                 if (score >= probcutBeta)
-                    score = -alphaBeta(pos, depth - tuned::PROBCUT_DEPTH + 1, -probcutBeta,
-                                       -probcutBeta + 1, ply + 1, false, !cutNode);
+                    score = -alphaBeta(pos, depth - tuned::PROBCUT_DEPTH + 1, -probcutBeta, -probcutBeta + 1, ply + 1,
+                                       false, !cutNode);
                 pos.undoMove(m);
 
                 if (stopFlag.load(std::memory_order_relaxed))
@@ -1284,8 +1278,8 @@ namespace
             const bool canPrune = ply > 0 && !shallowSearch && hasNonPawn && bestScore > -MATE_THRESHOLD;
 
             // Late move pruning skips the remaining quiets once enough moves were tried
-            if (canPrune && quiet && !inCheck && depth <= tuned::LMP_DEPTH &&
-                moveCount > (tuned::LMP_BASE + depth * depth) / (2 - improving))
+            if (canPrune && quiet && !inCheck && depth <= tuned::LMP_DEPTH
+                && moveCount > (tuned::LMP_BASE + depth * depth) / (2 - improving))
             {
                 const int skipped = picker.skipQuiets(pos, excluded, legality);
                 moveCount += skipped;
@@ -1298,7 +1292,8 @@ namespace
             if (canPrune)
             {
                 // History and futility and SEE pruning use the depth after the expected reduction
-                const int lmrDepth = std::max(0, depth - 1 - lmrTable[std::min(depth, MAX_DEPTH - 1)][std::min(moveCount, 63)]);
+                const int lmrDepth =
+                    std::max(0, depth - 1 - lmrTable[std::min(depth, MAX_DEPTH - 1)][std::min(moveCount, 63)]);
 
                 if (quiet && !checks)
                 {
@@ -1308,8 +1303,8 @@ namespace
                         continue;
                     }
 
-                    if (!inCheck && lmrDepth <= tuned::FUTILITY_DEPTH &&
-                        staticEval + tuned::FUTILITY_BASE + tuned::FUTILITY_MARGIN * lmrDepth <= alpha)
+                    if (!inCheck && lmrDepth <= tuned::FUTILITY_DEPTH
+                        && staticEval + tuned::FUTILITY_BASE + tuned::FUTILITY_MARGIN * lmrDepth <= alpha)
                     {
                         ++stats::current().futilityPruned;
                         continue;
@@ -1323,9 +1318,10 @@ namespace
                 }
                 else
                 {
-                    if (!quiet && !checks && !inCheck && lmrDepth < tuned::CAPTURE_FUTILITY_DEPTH &&
-                        staticEval + tuned::CAPTURE_FUTILITY_BASE + tuned::CAPTURE_FUTILITY_MARGIN * lmrDepth +
-                                pieceValue(typeOf(victimOf(pos, m))) <= alpha)
+                    if (!quiet && !checks && !inCheck && lmrDepth < tuned::CAPTURE_FUTILITY_DEPTH
+                        && staticEval + tuned::CAPTURE_FUTILITY_BASE + tuned::CAPTURE_FUTILITY_MARGIN * lmrDepth
+                                   + pieceValue(typeOf(victimOf(pos, m)))
+                               <= alpha)
                     {
                         ++stats::current().futilityPruned;
                         continue;
@@ -1341,14 +1337,15 @@ namespace
 
             // Singular extension extends a table move that beats every alternative by a margin
             int extension = 0;
-            if (ply > 0 && ply < 2 * rootDepth && m == ttMove && excluded == Move() && depth >= tuned::SE_DEPTH &&
-                ttDepth >= depth - 3 && (ttBound == BOUND_LOWER || ttBound == BOUND_EXACT) &&
-                ttScore > -MATE_THRESHOLD && ttScore < MATE_THRESHOLD)
+            if (ply > 0 && ply < 2 * rootDepth && m == ttMove && excluded == Move() && depth >= tuned::SE_DEPTH
+                && ttDepth >= depth - 3 && (ttBound == BOUND_LOWER || ttBound == BOUND_EXACT)
+                && ttScore > -MATE_THRESHOLD && ttScore < MATE_THRESHOLD)
             {
                 const int singularBeta = ttScore - depth * tuned::SE_MARGIN / 8;
 
                 excludedStack[ply] = m;
-                const int singularScore = alphaBeta(pos, (depth - 1) / 2, singularBeta - 1, singularBeta, ply, false, cutNode);
+                const int singularScore =
+                    alphaBeta(pos, (depth - 1) / 2, singularBeta - 1, singularBeta, ply, false, cutNode);
                 excludedStack[ply] = Move();
                 pvLength[ply] = ply;
 
@@ -1356,7 +1353,10 @@ namespace
                     return 0;
 
                 if (singularScore < singularBeta)
-                    extension = !pvNode && singularScore < singularBeta - tuned::SE_DOUBLE_MARGIN && doubleExtensions[ply] < 6 ? 2 : 1;
+                    extension =
+                        !pvNode && singularScore < singularBeta - tuned::SE_DOUBLE_MARGIN && doubleExtensions[ply] < 6
+                            ? 2
+                            : 1;
                 else if (singularBeta >= beta)
                     return singularBeta;
                 else if (ttScore >= beta || cutNode)
@@ -1440,7 +1440,8 @@ namespace
             if (stopFlag.load(std::memory_order_relaxed))
                 return 0;
 
-            if (ply == 0 && workerId == 0 && showRefutations && !refutationSent && bestScore > -INF && score < bestScore)
+            if (ply == 0 && workerId == 0 && showRefutations && !refutationSent && bestScore > -INF
+                && score < bestScore)
             {
                 Move line[MAX_PLY];
                 int length = 1;
@@ -1508,8 +1509,8 @@ namespace
 
             if (!inCheck && (bound == BOUND_UPPER || !movegen::isTactical(pos, bestMove))
                 && !(bound == BOUND_LOWER && bestScore <= staticEval)
-                && !(bound == BOUND_UPPER && bestScore >= staticEval)
-                && bestScore > -MATE_THRESHOLD && bestScore < MATE_THRESHOLD)
+                && !(bound == BOUND_UPPER && bestScore >= staticEval) && bestScore > -MATE_THRESHOLD
+                && bestScore < MATE_THRESHOLD)
                 updateCorrections(pos, bestScore - staticEval, depth);
         }
 
@@ -1561,7 +1562,8 @@ namespace
             ttBound = tte->bound();
             const bool mate = ttScore >= MATE_THRESHOLD || ttScore <= -MATE_THRESHOLD;
             const bool pvNode = beta - alpha > 1;
-            if ((ttBound == BOUND_EXACT || (ttBound == BOUND_LOWER && ttScore >= beta) || (ttBound == BOUND_UPPER && ttScore <= alpha))
+            if ((ttBound == BOUND_EXACT || (ttBound == BOUND_LOWER && ttScore >= beta)
+                 || (ttBound == BOUND_UPPER && ttScore <= alpha))
                 && (!pvNode || !mate || hasMateProof(pos, ply, ttScore)))
                 return ttScore;
         }
@@ -1575,7 +1577,8 @@ namespace
             standPat = correctedEval(pos, rawEval);
             bestScore = standPat;
             if (ttBound != BOUND_NONE && ttScore > -MATE_THRESHOLD && ttScore < MATE_THRESHOLD
-                && (ttBound == BOUND_EXACT || (ttBound == BOUND_LOWER && ttScore > standPat) || (ttBound == BOUND_UPPER && ttScore < standPat)))
+                && (ttBound == BOUND_EXACT || (ttBound == BOUND_LOWER && ttScore > standPat)
+                    || (ttBound == BOUND_UPPER && ttScore < standPat)))
                 bestScore = ttScore;
             if (bestScore >= beta)
             {
@@ -1801,11 +1804,10 @@ namespace
 
         if (!silentOutput && partialPv[0] != previousBest)
         {
-            const long long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                          std::chrono::steady_clock::now() - start)
-                                          .count();
-            const uint64_t reported = searchedNodes.load(std::memory_order_relaxed)
-                                      + static_cast<uint64_t>(nodes & 2047);
+            const long long elapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+            const uint64_t reported =
+                searchedNodes.load(std::memory_order_relaxed) + static_cast<uint64_t>(nodes & 2047);
             std::lock_guard<std::mutex> lock(outputMutex);
             printInfoLocked(depth, partialScore, reported, elapsed, partialPv, partialPvLength, 1, partialLowerBound);
         }
@@ -1827,8 +1829,7 @@ namespace
 
         if (ponderFlag.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed))
         {
-            while (!stopRequested.load(std::memory_order_relaxed)
-                   && !ponderHitFlag.load(std::memory_order_relaxed))
+            while (!stopRequested.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed))
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
@@ -1996,9 +1997,8 @@ namespace
                 currentMultiPV = mpv;
                 rootDepth = depth;
                 seldepth = 0;
-                const int score = (mpv == 1)
-                                      ? aspirationSearch(pos, depth, previousScore)
-                                      : alphaBeta(pos, depth, -INF, INF, 0, true, false);
+                const int score = (mpv == 1) ? aspirationSearch(pos, depth, previousScore)
+                                             : alphaBeta(pos, depth, -INF, INF, 0, true, false);
 
                 if (stopFlag.load(std::memory_order_relaxed))
                 {
@@ -2055,13 +2055,14 @@ namespace
                                                       .count();
                         // Report aggregate nodes plus the unflushed batch so nps scales with
                         // thread count and shallow searches do not report zero.
-                        const uint64_t reported = searchedNodes.load(std::memory_order_relaxed)
-                                                  + static_cast<uint64_t>(nodes & 2047);
+                        const uint64_t reported =
+                            searchedNodes.load(std::memory_order_relaxed) + static_cast<uint64_t>(nodes & 2047);
                         std::lock_guard<std::mutex> lock(outputMutex);
                         for (int i = 0; i < lineCount; ++i)
                         {
                             seldepth = lines[i].seldepth;
-                            printInfoLocked(depth, lines[i].score, reported, elapsed, lines[i].pv, lines[i].pvLength, i + 1);
+                            printInfoLocked(depth, lines[i].score, reported, elapsed, lines[i].pv, lines[i].pvLength,
+                                            i + 1);
                         }
                         seldepth = lines[0].seldepth;
                     }
@@ -2083,8 +2084,8 @@ namespace
             if (!rootHasLegalMove)
                 break;
 
-            if (isMain && depth >= 4 && !activeLimits.infinite &&
-                !(ponderFlag.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed)))
+            if (isMain && depth >= 4 && !activeLimits.infinite
+                && !(ponderFlag.load(std::memory_order_relaxed) && !ponderHitFlag.load(std::memory_order_relaxed)))
             {
                 const Move iterationBest = lineCount > 0 ? lines[0].move : Move();
                 if (iterationBest == stableMove)
@@ -2097,14 +2098,15 @@ namespace
 
                 manager::observe(previousScore, scoreDrop, stableIterations, rootMoveEffort(iterationBest));
 
-                if (lineCount > 0 && playsInstantly(pos, depth, iterationBest, previousScore, scoreDrop, stableIterations))
+                if (lineCount > 0
+                    && playsInstantly(pos, depth, iterationBest, previousScore, scoreDrop, stableIterations))
                 {
                     reportInstant(instant::kind());
                     stopFlag.store(true, std::memory_order_relaxed);
                 }
                 else if (manager::budgeted()
-                    && manager::shouldStop(pos, previousScore, scoreDrop, stableIterations, depth,
-                                           manager::elapsedMs() - iterationStart))
+                         && manager::shouldStop(pos, previousScore, scoreDrop, stableIterations, depth,
+                                                manager::elapsedMs() - iterationStart))
                     stopFlag.store(true, std::memory_order_relaxed);
             }
 
@@ -2145,8 +2147,8 @@ int search::clampOption(const char *name, int value, int minValue, int maxValue)
     if (clamped != value)
     {
         std::lock_guard<std::mutex> lock(outputMutex);
-        std::cout << "info string " << name << " value " << value << " is out of range ["
-                  << minValue << ", " << maxValue << "], set to " << clamped << std::endl;
+        std::cout << "info string " << name << " value " << value << " is out of range [" << minValue << ", "
+                  << maxValue << "], set to " << clamped << std::endl;
     }
     return clamped;
 }
@@ -2286,15 +2288,9 @@ void search::stop()
     stopFlag.store(true, std::memory_order_relaxed);
 }
 
-bool search::isRunning()
-{
-    return searching.load(std::memory_order_relaxed);
-}
+bool search::isRunning() { return searching.load(std::memory_order_relaxed); }
 
-std::mutex &search::outputLock()
-{
-    return outputMutex;
-}
+std::mutex &search::outputLock() { return outputMutex; }
 
 Move search::bestMove()
 {
@@ -2308,10 +2304,7 @@ int search::bestScore()
     return finalScore;
 }
 
-uint64_t search::totalNodes()
-{
-    return globalNodes.load(std::memory_order_relaxed);
-}
+uint64_t search::totalNodes() { return globalNodes.load(std::memory_order_relaxed); }
 
 void search::setHashSize(int megabytes)
 {
@@ -2333,8 +2326,8 @@ void search::setHashSize(int megabytes)
     catch (const std::bad_alloc &)
     {
         std::lock_guard<std::mutex> lock(outputMutex);
-        std::cout << "info string Hash " << megabytes << " MB could not be allocated, keeping "
-                  << hashSizeMb << " MB" << std::endl;
+        std::cout << "info string Hash " << megabytes << " MB could not be allocated, keeping " << hashSizeMb << " MB"
+                  << std::endl;
         return;
     }
     hashSizeMb = megabytes;
@@ -2345,35 +2338,17 @@ void search::setThreads(int count)
     threadCountSetting = clampOption("Threads", count, THREADS_MIN, maxThreadCount());
 }
 
-int search::threadSetting()
-{
-    return threadCountSetting;
-}
+int search::threadSetting() { return threadCountSetting; }
 
-void search::setSilent(bool enabled)
-{
-    silentOutput = enabled;
-}
+void search::setSilent(bool enabled) { silentOutput = enabled; }
 
-int search::hashSize()
-{
-    return hashSizeMb;
-}
+int search::hashSize() { return hashSizeMb; }
 
-int search::threadCount()
-{
-    return threadCountSetting;
-}
+int search::threadCount() { return threadCountSetting; }
 
-int search::maxThreadCount()
-{
-    return hardwareThreads();
-}
+int search::maxThreadCount() { return hardwareThreads(); }
 
-void search::setMultiPV(int value)
-{
-    multiPVSetting = clampOption("MultiPV", value, MULTIPV_MIN, MULTIPV_MAX);
-}
+void search::setMultiPV(int value) { multiPVSetting = clampOption("MultiPV", value, MULTIPV_MIN, MULTIPV_MAX); }
 
 void search::setContempt(int value)
 {
@@ -2394,10 +2369,7 @@ void search::setAnalyseMode(bool enabled)
     clear();
 }
 
-void search::setShowRefutations(bool enabled)
-{
-    showRefutations = enabled;
-}
+void search::setShowRefutations(bool enabled) { showRefutations = enabled; }
 
 void search::setMoveOverhead(int ms)
 {

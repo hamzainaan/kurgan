@@ -43,10 +43,8 @@ namespace
 
     char pieceToChar(Piece p)
     {
-        static constexpr char chars[PIECE_NB] = {
-            ' ', 'P', 'N', 'B', 'R', 'Q', 'K',
-            ' ', ' ',
-            'p', 'n', 'b', 'r', 'q', 'k', ' '};
+        static constexpr char chars[PIECE_NB] = {' ', 'P', 'N', 'B', 'R', 'Q', 'K', ' ',
+                                                 ' ', 'p', 'n', 'b', 'r', 'q', 'k', ' '};
         return (p >= NO_PIECE && p < PIECE_NB) ? chars[p] : ' ';
     }
 }
@@ -55,10 +53,7 @@ namespace
 {
     uint64_t rngState = 0x9E3779B97F4A7C15ULL;
 
-    uint64_t rand64()
-    {
-        return splitMix64(rngState);
-    }
+    uint64_t rand64() { return splitMix64(rngState); }
 
     std::array<std::array<uint64_t, SQUARE_NB>, PIECE_NB> pieceKeys{};
     uint64_t sideKey = 0;
@@ -83,15 +78,9 @@ namespace
     }
 
     // Only the file of the en passant square enters the key
-    uint64_t epKey(Square s)
-    {
-        return s == SQ_NONE ? 0 : enPassantKeys[s & 7];
-    }
+    uint64_t epKey(Square s) { return s == SQ_NONE ? 0 : enPassantKeys[s & 7]; }
 
-    Bitboard backRankOf(Color c)
-    {
-        return 0xFFULL << (8 * static_cast<int>(c == WHITE ? RANK_1 : RANK_8));
-    }
+    Bitboard backRankOf(Color c) { return 0xFFULL << (8 * static_cast<int>(c == WHITE ? RANK_1 : RANK_8)); }
 
     // Returns the square in coordinate notation
     std::string squareName(Square s)
@@ -100,10 +89,7 @@ namespace
     }
 }
 
-Position::Position()
-{
-    setFen(START_FEN);
-}
+Position::Position() { setFen(START_FEN); }
 
 void Position::clear()
 {
@@ -269,8 +255,8 @@ bool Position::doMove(Move move, bool knownLegal)
 
     if (pt == KING)
     {
-        castlingRights = static_cast<uint8_t>(
-            castlingRights & ~(castlingRight(us, KING_SIDE) | castlingRight(us, QUEEN_SIDE)));
+        castlingRights =
+            static_cast<uint8_t>(castlingRights & ~(castlingRight(us, KING_SIDE) | castlingRight(us, QUEEN_SIDE)));
     }
     else if (pt == ROOK)
     {
@@ -505,8 +491,7 @@ bool Position::parseCastling(const std::string &castlingStr)
             const Bitboard rooks = byColor[color] & byType[ROOK] & backRankOf(color);
             const Square ksq = kingSquare(color);
 
-            const Square outer = queenSide ? (rooks ? lsb(rooks) : SQ_NONE)
-                                           : (rooks ? msb(rooks) : SQ_NONE);
+            const Square outer = queenSide ? (rooks ? lsb(rooks) : SQ_NONE) : (rooks ? msb(rooks) : SQ_NONE);
             const bool usable = outer != SQ_NONE && (ksq == SQ_NONE || (queenSide ? outer < ksq : outer > ksq));
             rookSq = usable ? outer : makeSquare(queenSide ? FILE_A : FILE_H, homeRank);
             break;
@@ -566,9 +551,9 @@ bool Position::parseEnPassant(const std::string &epStr)
         const Color them = static_cast<Color>(sideToMove ^ 1);
         const int victim = static_cast<int>(enPassantSquare) + (sideToMove == WHITE ? -8 : 8);
 
-        const bool capturable = r == (sideToMove == WHITE ? RANK_6 : RANK_3)
-            && (movegen::pawnAttacksFrom(them, enPassantSquare) & byColor[sideToMove]
-                & byType[PAWN])
+        const bool capturable =
+            r == (sideToMove == WHITE ? RANK_6 : RANK_3)
+            && (movegen::pawnAttacksFrom(them, enPassantSquare) & byColor[sideToMove] & byType[PAWN])
             && (byColor[them] & byType[PAWN] & (1ULL << victim));
         if (!capturable)
             enPassantSquare = SQ_NONE;

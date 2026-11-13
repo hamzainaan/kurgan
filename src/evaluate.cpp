@@ -38,27 +38,19 @@ namespace
         HALF_BB[WHITE] | (RANK_1_BB << 32),
         (RANK_1_BB << 24) | HALF_BB[BLACK],
     };
-    constexpr Bitboard KING_ZONE_FLANK[8] = {
-        QSIDE_BB, QSIDE_BB, QSIDE_BB, CENTER_FILES_BB, CENTER_FILES_BB, KSIDE_BB, KSIDE_BB, KSIDE_BB};
-    constexpr Bitboard KING_DEFENSE_ZONE[8] = {
-        QSIDE_BB ^ FILE_D_BB, QSIDE_BB ^ FILE_D_BB, QSIDE_BB ^ FILE_D_BB, FILE_D_BB | FILE_E_BB,
-        FILE_D_BB | FILE_E_BB, KSIDE_BB ^ FILE_E_BB, KSIDE_BB ^ FILE_E_BB, KSIDE_BB ^ FILE_E_BB};
-    constexpr Bitboard QSIDE_DIAG_REGION[2] = {
-        FILE_F_BB | ((FILE_E_BB | FILE_D_BB) & 0x0000FFFFFFFF0000ULL),
-        FILE_F_BB | FILE_E_BB | FILE_D_BB};
-    constexpr Bitboard KSIDE_DIAG_REGION[2] = {
-        FILE_C_BB | ((FILE_D_BB | FILE_E_BB) & 0x0000FFFFFFFF0000ULL),
-        FILE_C_BB | FILE_D_BB | FILE_E_BB};
+    constexpr Bitboard KING_ZONE_FLANK[8] = {QSIDE_BB,        QSIDE_BB, QSIDE_BB, CENTER_FILES_BB,
+                                             CENTER_FILES_BB, KSIDE_BB, KSIDE_BB, KSIDE_BB};
+    constexpr Bitboard KING_DEFENSE_ZONE[8] = {QSIDE_BB ^ FILE_D_BB,  QSIDE_BB ^ FILE_D_BB,  QSIDE_BB ^ FILE_D_BB,
+                                               FILE_D_BB | FILE_E_BB, FILE_D_BB | FILE_E_BB, KSIDE_BB ^ FILE_E_BB,
+                                               KSIDE_BB ^ FILE_E_BB,  KSIDE_BB ^ FILE_E_BB};
+    constexpr Bitboard QSIDE_DIAG_REGION[2] = {FILE_F_BB | ((FILE_E_BB | FILE_D_BB) & 0x0000FFFFFFFF0000ULL),
+                                               FILE_F_BB | FILE_E_BB | FILE_D_BB};
+    constexpr Bitboard KSIDE_DIAG_REGION[2] = {FILE_C_BB | ((FILE_D_BB | FILE_E_BB) & 0x0000FFFFFFFF0000ULL),
+                                               FILE_C_BB | FILE_D_BB | FILE_E_BB};
 
-    Bitboard fileMask(int file)
-    {
-        return (file < 0 || file > 7) ? 0 : FILE_A_BB << file;
-    }
+    Bitboard fileMask(int file) { return (file < 0 || file > 7) ? 0 : FILE_A_BB << file; }
 
-    Bitboard rankMask(int rank)
-    {
-        return RANK_1_BB << (8 * rank);
-    }
+    Bitboard rankMask(int rank) { return RANK_1_BB << (8 * rank); }
 
     // Maps a square to its piece square table index for the given side
     int pstIndex(Square sq, Color c)
@@ -68,10 +60,7 @@ namespace
         return c == WHITE ? (7 - rank) * 8 + file : rank * 8 + file;
     }
 
-    int relativeRank(Color c, int rank)
-    {
-        return rank ^ (7 * c);
-    }
+    int relativeRank(Color c, int rank) { return rank ^ (7 * c); }
 
     // Returns every rank in front of the given rank for that color
     Bitboard ranksAhead(Color c, int rank)
@@ -106,10 +95,7 @@ namespace
         return passed;
     }
 
-    Bitboard advanceOf(Color c, Square sq)
-    {
-        return 1ULL << static_cast<int>(sq + (c == WHITE ? 8 : -8));
-    }
+    Bitboard advanceOf(Color c, Square sq) { return 1ULL << static_cast<int>(sq + (c == WHITE ? 8 : -8)); }
 
     Square promotionSquare(Color c, Square sq)
     {
@@ -249,8 +235,8 @@ namespace
         }
     }
 
-    void pawnStructureScore(const Position &pos, const AttackInfo &ai, Bitboard occ,
-                            const Bitboard passed[COLOR_NB], Color c, int &mg, int &eg)
+    void pawnStructureScore(const Position &pos, const AttackInfo &ai, Bitboard occ, const Bitboard passed[COLOR_NB],
+                            Color c, int &mg, int &eg)
     {
         const Color them = static_cast<Color>(c ^ 1);
         const Bitboard pawns = pos.byColor[c] & pos.byType[PAWN];
@@ -289,8 +275,7 @@ namespace
 
             if (kingsValid)
             {
-                const int d = squareDistance(stop, theirKing) * relRank
-                              - squareDistance(stop, ownKing) * (relRank - 1);
+                const int d = squareDistance(stop, theirKing) * relRank - squareDistance(stop, ownKing) * (relRank - 1);
                 if (d > escort)
                     escort = d;
             }
@@ -316,8 +301,7 @@ namespace
             if (relRank >= 4 && defended && !(enemyPawns & fileMask(file) & ranksAhead(c, rank)))
                 ++candidate;
 
-            if (!defended && (theirPawnAttacks & advanceOf(c, sq))
-                && !(pawns & adjacent & ~ranksAhead(c, rank)))
+            if (!defended && (theirPawnAttacks & advanceOf(c, sq)) && !(pawns & adjacent & ~ranksAhead(c, rank)))
                 ++backward;
         }
 
@@ -338,13 +322,13 @@ namespace
         const int phalanx = popCount(pawns & (pawns >> 1) & ~FILE_H_BB);
 
         const Bitboard aheadOfPawns = (c == WHITE) ? (pawns << 8) : (pawns >> 8);
-        const int minorBehind = popCount(aheadOfPawns & pos.byColor[c]
-                                         & (pos.byType[KNIGHT] | pos.byType[BISHOP]));
+        const int minorBehind = popCount(aheadOfPawns & pos.byColor[c] & (pos.byType[KNIGHT] | pos.byType[BISHOP]));
 
-        const int counts[PAWN_STRUCT_NB] = {backward, connected, phalanx, islands,
-                                            protectedPasser, candidate, blocked, kingDistance,
-                                            ownKingDistance, enemyKingDistance, escort,
-                                            popCount(ourAttacks & pushedPassers), minorBehind};
+        const int counts[PAWN_STRUCT_NB] = {backward,          connected,       phalanx,
+                                            islands,           protectedPasser, candidate,
+                                            blocked,           kingDistance,    ownKingDistance,
+                                            enemyKingDistance, escort,          popCount(ourAttacks & pushedPassers),
+                                            minorBehind};
         for (int i = 0; i < PAWN_STRUCT_NB; ++i)
         {
             mg += tuned::MG_PAWN_STRUCT[i] * counts[i];
@@ -356,16 +340,15 @@ namespace
     }
 
     // Scores passed pawns by how freely they can advance
-    void passerRaceScore(const Position &pos, const AttackInfo &ai, Bitboard occ,
-                         const Bitboard passed[COLOR_NB], Color c, int &mg, int &eg)
+    void passerRaceScore(const Position &pos, const AttackInfo &ai, Bitboard occ, const Bitboard passed[COLOR_NB],
+                         Color c, int &mg, int &eg)
     {
         const Color them = static_cast<Color>(c ^ 1);
         const Bitboard ourPassers = pos.byColor[c] & pos.byType[PAWN] & passed[c];
         if (ourPassers == 0)
             return;
 
-        const Bitboard theirControl = ai.byType[them][PAWN] | ai.byType[them][KING]
-                                      | ai.full[them];
+        const Bitboard theirControl = ai.byType[them][PAWN] | ai.byType[them][KING] | ai.full[them];
         const Square theirKing = pos.kingSquare(them);
 
         int free = 0;
@@ -387,22 +370,18 @@ namespace
                     ++free;
 
                 // The pawn wins the race when the enemy king needs more moves than the pawn.
-                if (theirKing != SQ_NONE
-                    && squareDistance(theirKing, promotionSquare(c, sq)) > 7 - relRank)
+                if (theirKing != SQ_NONE && squareDistance(theirKing, promotionSquare(c, sq)) > 7 - relRank)
                     ++winsRace;
             }
         }
 
-        mg += tuned::MG_PAWN_STRUCT[PAWN_PASSER_FREE] * free
-              + tuned::MG_PAWN_STRUCT[PAWN_PASSER_CONTAINED] * contained
+        mg += tuned::MG_PAWN_STRUCT[PAWN_PASSER_FREE] * free + tuned::MG_PAWN_STRUCT[PAWN_PASSER_CONTAINED] * contained
               + tuned::MG_PAWN_STRUCT[PAWN_PASSER_WINS_RACE] * winsRace;
-        eg += tuned::EG_PAWN_STRUCT[PAWN_PASSER_FREE] * free
-              + tuned::EG_PAWN_STRUCT[PAWN_PASSER_CONTAINED] * contained
+        eg += tuned::EG_PAWN_STRUCT[PAWN_PASSER_FREE] * free + tuned::EG_PAWN_STRUCT[PAWN_PASSER_CONTAINED] * contained
               + tuned::EG_PAWN_STRUCT[PAWN_PASSER_WINS_RACE] * winsRace;
     }
 
-    void minorPieceScore(const Position &pos, const int counts[COLOR_NB][PIECE_TYPE_NB], Color c,
-                         int &mg, int &eg)
+    void minorPieceScore(const Position &pos, const int counts[COLOR_NB][PIECE_TYPE_NB], Color c, int &mg, int &eg)
     {
         const Bitboard ownPawns = pos.byColor[c] & pos.byType[PAWN];
 
@@ -416,8 +395,7 @@ namespace
         while (b)
         {
             const Square sq = popLsb(b);
-            const Bitboard sameColor =
-                ((((sq & 7) + (sq >> 3)) & 1) != 0) ? LIGHT_SQ_BB : ~LIGHT_SQ_BB;
+            const Bitboard sameColor = ((((sq & 7) + (sq >> 3)) & 1) != 0) ? LIGHT_SQ_BB : ~LIGHT_SQ_BB;
             const int blocked = popCount(ownPawns & sameColor);
             mg += tuned::MG_MINOR[MINOR_BISHOP_PAWNS + blocked];
             eg += tuned::EG_MINOR[MINOR_BISHOP_PAWNS + blocked];
@@ -436,8 +414,7 @@ namespace
         }
     }
 
-    void rookScore(const Position &pos, const Bitboard passed[COLOR_NB], Color c, Bitboard occ,
-                   int &mg, int &eg)
+    void rookScore(const Position &pos, const Bitboard passed[COLOR_NB], Color c, Bitboard occ, int &mg, int &eg)
     {
         const Color them = static_cast<Color>(c ^ 1);
         const Bitboard ownPawns = pos.byColor[c] & pos.byType[PAWN];
@@ -539,9 +516,8 @@ namespace
 
         const Bitboard empty = ~occ;
         const Bitboard single = (c == WHITE) ? ((ourPawns << 8) & empty) : ((ourPawns >> 8) & empty);
-        const Bitboard pushes = single
-            | ((c == WHITE) ? ((single << 8) & empty & RANK_4_BB)
-                            : ((single >> 8) & empty & RANK_5_BB));
+        const Bitboard pushes =
+            single | ((c == WHITE) ? ((single << 8) & empty & RANK_4_BB) : ((single >> 8) & empty & RANK_5_BB));
         counts[THREAT_PAWN_MOBILITY] = popCount(pushes & safeArea);
 
         const Bitboard safePawns = ourPawns & safeArea;
@@ -627,8 +603,7 @@ namespace
             const int state = (ownOnFile == 0) ? 0 : ((ownOnFile & (1ULL << stopSq)) ? 1 : 2);
             ks -= tuned::PAWN_STORM_VALUE[state][f][r];
 
-            if (f == 0 && (kingFile == 0 || kingFile == 7) && (r == 1 || r == 2)
-                && relativeRank(c, kingRank) + 1 == r)
+            if (f == 0 && (kingFile == 0 || kingFile == 7) && (r == 1 || r == 2) && relativeRank(c, kingRank) + 1 == r)
                 ks -= tuned::PAWN_STORM_SHIELDING_KING;
         }
     }
@@ -670,8 +645,8 @@ namespace
         else if (kingFile == 0)
             neighborhood |= neighborhood << 1;
 
-        const Bitboard weakMap = ~ai.doubled[defender]
-            & ((~ai.byType[defender][PAWN] & ~ai.full[defender]) | ai.byType[defender][QUEEN]);
+        const Bitboard weakMap =
+            ~ai.doubled[defender] & ((~ai.byType[defender][PAWN] & ~ai.full[defender]) | ai.byType[defender][QUEEN]);
         const Bitboard kingDefenseless = kingSqs & weakMap;
 
         const Bitboard checkKnights = movegen::attacks(KNIGHT, defKingSq, occ);
@@ -696,34 +671,31 @@ namespace
             pts += tuned::KING_DEFENSELESS_SQUARE * popCount(entry.attacks & kingDefenseless);
         }
 
-        pts += tuned::SAFE_CHECK_BONUS[0]
-            * ((ai.byType[attacker][KNIGHT] & checkKnights & ~kingSqs & weakMap) ? 1 : 0);
-        pts += tuned::SAFE_CHECK_BONUS[1]
-            * ((ai.byType[attacker][BISHOP] & checkBishops & ~kingSqs & weakMap) ? 1 : 0);
-        pts += tuned::SAFE_CHECK_BONUS[2]
-            * ((ai.byType[attacker][ROOK] & checkRooks & ~kingSqs & weakMap) ? 1 : 0);
-        pts += tuned::SAFE_CHECK_BONUS[3]
-            * ((ai.byType[attacker][QUEEN] & checkQueens & ~kingSqs & weakMap
-                & ~ai.byType[defender][QUEEN]) ? 1 : 0);
+        pts += tuned::SAFE_CHECK_BONUS[0] * ((ai.byType[attacker][KNIGHT] & checkKnights & ~kingSqs & weakMap) ? 1 : 0);
+        pts += tuned::SAFE_CHECK_BONUS[1] * ((ai.byType[attacker][BISHOP] & checkBishops & ~kingSqs & weakMap) ? 1 : 0);
+        pts += tuned::SAFE_CHECK_BONUS[2] * ((ai.byType[attacker][ROOK] & checkRooks & ~kingSqs & weakMap) ? 1 : 0);
+        pts +=
+            tuned::SAFE_CHECK_BONUS[3]
+            * ((ai.byType[attacker][QUEEN] & checkQueens & ~kingSqs & weakMap & ~ai.byType[defender][QUEEN]) ? 1 : 0);
 
         pts += attackPieces * attackPts;
 
         const Bitboard kingZone = KING_ZONE_DEFENDER[defender] & KING_ZONE_FLANK[kingFile];
         const int kingPressure = tuned::KING_PRESSURE
-            * (popCount(ai.full[attacker] & kingZone)
-               + popCount(ai.doubled[attacker] & ~ai.byType[defender][PAWN] & kingZone));
+                                 * (popCount(ai.full[attacker] & kingZone)
+                                    + popCount(ai.doubled[attacker] & ~ai.byType[defender][PAWN] & kingZone));
 
         pts += (-tuned::KS_PAWN_FACTOR * pawnScore + tuned::KS_KING_PRESSURE_FACTOR * kingPressure) / 32;
 
         const Bitboard kingDefenseZone = KING_DEFENSE_ZONE[kingFile] & HALF_BB[defender];
         pts += tuned::KS_NO_KNIGHT_DEFENDER
-            * (((kingDefenseZone & ai.byType[defender][KNIGHT]) ? 0 : 1)
-               + ((kingZone & ai.byType[defender][KNIGHT]) ? 0 : 1))
-            * counts[defender][KNIGHT];
+               * (((kingDefenseZone & ai.byType[defender][KNIGHT]) ? 0 : 1)
+                  + ((kingZone & ai.byType[defender][KNIGHT]) ? 0 : 1))
+               * counts[defender][KNIGHT];
         pts += tuned::KS_NO_BISHOP_DEFENDER
-            * (((kingDefenseZone & ai.byType[defender][BISHOP]) ? 0 : 1)
-               + ((kingZone & ai.byType[defender][BISHOP]) ? 0 : 1))
-            * counts[defender][BISHOP];
+               * (((kingDefenseZone & ai.byType[defender][BISHOP]) ? 0 : 1)
+                  + ((kingZone & ai.byType[defender][BISHOP]) ? 0 : 1))
+               * counts[defender][BISHOP];
 
         const Bitboard attackerPawns = pos.byColor[attacker] & pos.byType[PAWN];
         const Bitboard defenderPawns = pos.byColor[defender] & pos.byType[PAWN];
@@ -783,8 +755,7 @@ namespace
         const uint8_t rights = static_cast<uint8_t>(c == WHITE ? (WHITE_OO | WHITE_OOO) : (BLACK_OO | BLACK_OOO));
         int ks = 0;
         kingPawnScore(pos, c, ks);
-        ks -= kingAttackScore(pos, ai, occ, counts, static_cast<Color>(c ^ 1), ks)
-            * tuned::KS_ATTACK_SCALE / 100;
+        ks -= kingAttackScore(pos, ai, occ, counts, static_cast<Color>(c ^ 1), ks) * tuned::KS_ATTACK_SCALE / 100;
         ks += tuned::CASTLING_RIGHTS_VALUE[popCount(static_cast<Bitboard>(pos.castlingRights & rights))];
         return ks * tuned::KS_SCALE / 100;
     }
@@ -841,7 +812,8 @@ int evaluate::hce(const Position &pos)
         mg[c] += kingSafetyScore(pos, ai, occ, counts, static_cast<Color>(c));
 
     // Game phase runs from 0 in the endgame to 24 in the middlegame.
-    int phase = popCount(pos.byType[KNIGHT] | pos.byType[BISHOP]) + 2 * popCount(pos.byType[ROOK]) + 4 * popCount(pos.byType[QUEEN]);
+    int phase = popCount(pos.byType[KNIGHT] | pos.byType[BISHOP]) + 2 * popCount(pos.byType[ROOK])
+                + 4 * popCount(pos.byType[QUEEN]);
     if (phase > 24)
         phase = 24;
 
@@ -865,7 +837,7 @@ namespace
             return nnue::evaluate(pos);
 #endif
 #ifdef KURGAN_HCE_OFF
-        (void) pos;
+        (void)pos;
         return 0;
 #else
         return evaluate::hce(pos);

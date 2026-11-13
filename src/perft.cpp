@@ -17,15 +17,11 @@ namespace
     };
 
     constexpr TestCase SUITE[] = {
-        {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-         5,
-         {1, 20, 400, 8902, 197281, 4865609, 119060324}},
+        {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 5, {1, 20, 400, 8902, 197281, 4865609, 119060324}},
         {"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
          4,
          {1, 48, 2039, 97862, 4085603, 193690690, 8031647685ULL}},
-        {"8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
-         5,
-         {1, 14, 191, 2812, 43238, 674624, 11030083}},
+        {"8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 5, {1, 14, 191, 2812, 43238, 674624, 11030083}},
         {"r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
          4,
          {1, 6, 264, 9467, 422333, 15833292, 706045033}},
@@ -36,42 +32,18 @@ namespace
          4,
          {1, 46, 2079, 89890, 3894594, 164075551, 6923051137ULL}},
 
-        {"bbqnnrkr/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w HFhf - 0 1",
-         4,
-         {1, 20, 400, 9006, 201143, 0, 0},
-         true},
-        {"nrkbbnqr/pppppppp/8/8/8/8/PPPPPPPP/NRKBBQNR w HBhb - 0 1",
-         4,
-         {1, 19, 361, 7775, 167038, 0, 0},
-         true},
-        {"qrnnbkrb/pppppppp/8/8/8/8/PPPPPPPP/QRNNBKRB w GEge - 0 1",
-         4,
-         {1, 21, 441, 10202, 234327, 0, 0},
-         true},
+        {"bbqnnrkr/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w HFhf - 0 1", 4, {1, 20, 400, 9006, 201143, 0, 0}, true},
+        {"nrkbbnqr/pppppppp/8/8/8/8/PPPPPPPP/NRKBBQNR w HBhb - 0 1", 4, {1, 19, 361, 7775, 167038, 0, 0}, true},
+        {"qrnnbkrb/pppppppp/8/8/8/8/PPPPPPPP/QRNNBKRB w GEge - 0 1", 4, {1, 21, 441, 10202, 234327, 0, 0}, true},
         // Castling leaves the king on g1 and moves the rook from h1 to f1.
-        {"4k3/8/8/8/8/8/8/6KR w H - 0 1",
-         6,
-         {1, 12, 53, 948, 5571, 102638, 583228},
-         true},
+        {"4k3/8/8/8/8/8/8/6KR w H - 0 1", 6, {1, 12, 53, 948, 5571, 102638, 583228}, true},
         // Castling swaps the king and rook between f1 and g1.
-        {"4k3/8/8/8/8/8/8/5KR1 w G - 0 1",
-         6,
-         {1, 13, 58, 1033, 5689, 105989, 601693},
-         true},
+        {"4k3/8/8/8/8/8/8/5KR1 w G - 0 1", 6, {1, 13, 58, 1033, 5689, 105989, 601693}, true},
         // The rook starts on the king's castling destination.
-        {"4k3/8/8/8/8/8/8/1KR5 w C - 0 1",
-         6,
-         {1, 17, 73, 1303, 7087, 130211, 731357},
-         true},
+        {"4k3/8/8/8/8/8/8/1KR5 w C - 0 1", 6, {1, 17, 73, 1303, 7087, 130211, 731357}, true},
         // The king move e1g1 is not castling here. Castling is encoded as e1h1 or e1a1.
-        {"4k3/8/8/8/8/8/8/R3K2R w HA - 0 1",
-         5,
-         {1, 26, 112, 3189, 17945, 532933, 0},
-         true},
-        {"r3k2r/8/8/8/8/8/8/R3K2R w HAha - 0 1",
-         4,
-         {1, 26, 568, 13744, 314346, 0, 0},
-         true},
+        {"4k3/8/8/8/8/8/8/R3K2R w HA - 0 1", 5, {1, 26, 112, 3189, 17945, 532933, 0}, true},
+        {"r3k2r/8/8/8/8/8/8/R3K2R w HAha - 0 1", 4, {1, 26, 568, 13744, 314346, 0, 0}, true},
     };
 
     // Generates evasions in check and every pseudo legal move otherwise
@@ -152,18 +124,14 @@ bool perft::suite()
             total += got;
             ok = ok && pass;
 
-            std::cout << "perft " << (i + 1) << (SUITE[i].chess960 ? " (960)" : "")
-                      << " depth " << depth
-                      << " nodes " << got << " expected " << want
-                      << (pass ? " ok" : " FAIL") << std::endl;
+            std::cout << "perft " << (i + 1) << (SUITE[i].chess960 ? " (960)" : "") << " depth " << depth << " nodes "
+                      << got << " expected " << want << (pass ? " ok" : " FAIL") << std::endl;
         }
     }
 
-    const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                             std::chrono::steady_clock::now() - start)
-                             .count();
-    std::cout << "perft suite " << (ok ? "passed" : "failed")
-              << " nodes " << total << " time " << ms << " ms";
+    const long long ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+    std::cout << "perft suite " << (ok ? "passed" : "failed") << " nodes " << total << " time " << ms << " ms";
     if (ms > 0)
         std::cout << " nps " << (total * 1000 / static_cast<uint64_t>(ms));
     std::cout << std::endl;

@@ -43,7 +43,7 @@ namespace
             for (int pt = PAWN; pt <= QUEEN; ++pt)
                 m.count[c][pt] = std::popcount(pos.byColor[c] & pos.byType[pt]);
             m.npm[c] = m.count[c][KNIGHT] * KNIGHT_VALUE + m.count[c][BISHOP] * BISHOP_VALUE
-                     + m.count[c][ROOK] * ROOK_VALUE + m.count[c][QUEEN] * QUEEN_VALUE;
+                       + m.count[c][ROOK] * ROOK_VALUE + m.count[c][QUEEN] * QUEEN_VALUE;
             m.pieces[c] = m.count[c][KNIGHT] + m.count[c][BISHOP] + m.count[c][ROOK] + m.count[c][QUEEN];
         }
         return m;
@@ -57,24 +57,15 @@ namespace
     }
 
     // True when the side has only its king
-    bool bare(const Material &m, Color c)
-    {
-        return m.pieces[c] == 0 && m.count[c][PAWN] == 0;
-    }
+    bool bare(const Material &m, Color c) { return m.pieces[c] == 0 && m.count[c][PAWN] == 0; }
 
     Bitboard bb(Square s) { return 1ULL << s; }
     Bitboard fileBB(int file) { return FILE_A_BB << file; }
     bool moreThanOne(Bitboard b) { return (b & (b - 1)) != 0; }
 
-    Square pieceSquare(const Position &pos, Color c, PieceType pt)
-    {
-        return lsb(pos.byColor[c] & pos.byType[pt]);
-    }
+    Square pieceSquare(const Position &pos, Color c, PieceType pt) { return lsb(pos.byColor[c] & pos.byType[pt]); }
 
-    Bitboard piecesOf(const Position &pos, Color c, PieceType pt)
-    {
-        return pos.byColor[c] & pos.byType[pt];
-    }
+    Bitboard piecesOf(const Position &pos, Color c, PieceType pt) { return pos.byColor[c] & pos.byType[pt]; }
 
     Square shift(Square s, int delta) { return static_cast<Square>(static_cast<int>(s) + delta); }
     Square flipFile(Square s) { return static_cast<Square>(s ^ 7); }
@@ -141,10 +132,7 @@ namespace
     }
 
     // Converts a strong side score to the side to move
-    int fromStrong(const Position &pos, Color strong, int value)
-    {
-        return pos.sideToMove == strong ? value : -value;
-    }
+    int fromStrong(const Position &pos, Color strong, int value) { return pos.sideToMove == strong ? value : -value; }
 
     // The bitbase covers the side to move and both kings and a pawn on files A to D
     constexpr unsigned KPK_SIZE = 2 * 24 * 64 * 64;
@@ -269,13 +257,12 @@ namespace
 
         const Square strongKing = pos.kingSquare(strong);
         const Square weakKing = pos.kingSquare(weak);
-        int result = std::min(m.npm[strong] + m.count[strong][PAWN] * PAWN_VALUE, MATERIAL_CAP)
-                     + pushToEdge(weakKing) + pushClose(strongKing, weakKing);
+        int result = std::min(m.npm[strong] + m.count[strong][PAWN] * PAWN_VALUE, MATERIAL_CAP) + pushToEdge(weakKing)
+                     + pushClose(strongKing, weakKing);
 
         const Bitboard bishops = piecesOf(pos, strong, BISHOP);
         constexpr Bitboard DARK = 0xAA55AA55AA55AA55ULL;
-        if (m.count[strong][QUEEN] || m.count[strong][ROOK]
-            || (m.count[strong][BISHOP] && m.count[strong][KNIGHT])
+        if (m.count[strong][QUEEN] || m.count[strong][ROOK] || (m.count[strong][BISHOP] && m.count[strong][KNIGHT])
             || ((bishops & DARK) && (bishops & ~DARK)))
             result += endgame::KNOWN_WIN;
 
@@ -329,8 +316,9 @@ namespace
                  && distance(strongKing, weakPawn) > 2 + (pos.sideToMove == strong))
             result = 80 - 8 * distance(strongKing, weakPawn);
         else
-            result = 200 - 8 * (distance(strongKing, pawnFront) - distance(weakKing, pawnFront)
-                                - distance(weakPawn, queening));
+            result =
+                200
+                - 8 * (distance(strongKing, pawnFront) - distance(weakKing, pawnFront) - distance(weakPawn, queening));
 
         return fromStrong(pos, strong, result);
     }
@@ -468,8 +456,7 @@ namespace
             && pos.byColor[weak] == (piecesOf(pos, weak, KING) | weakPawns) && weakPawns)
         {
             const Square weakPawn = strong == WHITE ? msb(weakPawns) : lsb(weakPawns);
-            if (relativeRank(strong, weakPawn) == RANK_7
-                && (strongPawns & bb(shift(weakPawn, pawnPush(weak))))
+            if (relativeRank(strong, weakPawn) == RANK_7 && (strongPawns & bb(shift(weakPawn, pawnPush(weak))))
                 && (oppositeColors(strongBishop, weakPawn) || !moreThanOne(strongPawns)))
             {
                 const int strongKingDistance = distance(weakPawn, strongKing);

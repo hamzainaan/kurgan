@@ -33,8 +33,7 @@ namespace
     std::string asciiLower(std::string text)
     {
         std::transform(text.begin(), text.end(), text.begin(),
-                       [](unsigned char c)
-                       { return static_cast<char>(std::tolower(c)); });
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         return text;
     }
 
@@ -66,9 +65,8 @@ namespace
     // Detects the tokens that end a searchmoves list
     bool isGoKeyword(const std::string &token)
     {
-        static const char *const keywords[] = {
-            "searchmoves", "ponder", "wtime", "btime", "winc", "binc",
-            "movestogo", "depth", "nodes", "mate", "movetime", "infinite"};
+        static const char *const keywords[] = {"searchmoves", "ponder", "wtime", "btime", "winc",     "binc",
+                                               "movestogo",   "depth",  "nodes", "mate",  "movetime", "infinite"};
         for (const char *keyword : keywords)
             if (token == keyword)
                 return true;
@@ -86,8 +84,8 @@ namespace
         const int toFile = s[2] - 'a';
         const int toRank = s[3] - '1';
 
-        if (fromFile < 0 || fromFile > 7 || fromRank < 0 || fromRank > 7 ||
-            toFile < 0 || toFile > 7 || toRank < 0 || toRank > 7)
+        if (fromFile < 0 || fromFile > 7 || fromRank < 0 || fromRank > 7 || toFile < 0 || toFile > 7 || toRank < 0
+            || toRank > 7)
             return Move();
 
         const Square from = makeSquare(static_cast<File>(fromFile), static_cast<Rank>(fromRank));
@@ -130,8 +128,7 @@ namespace
             {
                 if (promo != NO_PIECE_TYPE)
                     continue;
-                if (movegen::chess960() ? m.to() == to
-                                        : (to == castlingKingTo(m) || to == m.to()))
+                if (movegen::chess960() ? m.to() == to : (to == castlingKingTo(m) || to == m.to()))
                     return m;
                 continue;
             }
@@ -217,7 +214,7 @@ namespace
                     std::cout << "info string invalid move '" << moveStr << '\'' << std::endl;
                     break;
                 }
-                const Piece victim = m.isEnPassant() ? makePiece(static_cast<Color>(pos.sideToMove ^ 1), PAWN)
+                const Piece victim = m.isEnPassant()  ? makePiece(static_cast<Color>(pos.sideToMove ^ 1), PAWN)
                                      : m.isCastling() ? NO_PIECE
                                                       : pos.board[m.to()];
                 if (!pos.doMove(m))
@@ -306,8 +303,7 @@ namespace
         {
             search::prepare(pos, limits);
             active = true;
-            thread = std::thread([pos, limits]()
-                                 { search::go(pos, limits); });
+            thread = std::thread([pos, limits]() { search::go(pos, limits); });
         }
 
         void join()
@@ -319,10 +315,7 @@ namespace
             }
         }
 
-        bool running() const
-        {
-            return active && search::isRunning();
-        }
+        bool running() const { return active && search::isRunning(); }
 
     private:
         std::thread thread;
@@ -335,18 +328,18 @@ namespace
         std::lock_guard<std::mutex> lock(search::outputLock());
         std::cout << "id name Kurgan " << KURGAN_VERSION << std::endl;
         std::cout << "id author Hamza Inan" << std::endl;
-        std::cout << "option name Threads type spin default 1 min " << search::THREADS_MIN
-                  << " max " << search::maxThreadCount() << std::endl;
-        std::cout << "option name Hash type spin default 16 min " << search::HASH_MIN
-                  << " max " << search::HASH_MAX << std::endl;
+        std::cout << "option name Threads type spin default 1 min " << search::THREADS_MIN << " max "
+                  << search::maxThreadCount() << std::endl;
+        std::cout << "option name Hash type spin default 16 min " << search::HASH_MIN << " max " << search::HASH_MAX
+                  << std::endl;
         std::cout << "option name Clear Hash type button" << std::endl;
-        std::cout << "option name MultiPV type spin default 1 min " << search::MULTIPV_MIN
-                  << " max " << search::MULTIPV_MAX << std::endl;
+        std::cout << "option name MultiPV type spin default 1 min " << search::MULTIPV_MIN << " max "
+                  << search::MULTIPV_MAX << std::endl;
         std::cout << "option name Ponder type check default false" << std::endl;
-        std::cout << "option name Contempt type spin default 0 min " << search::CONTEMPT_MIN
-                  << " max " << search::CONTEMPT_MAX << std::endl;
-        std::cout << "option name Move Overhead type spin default " << search::MOVE_OVERHEAD_DEFAULT
-                  << " min " << search::MOVE_OVERHEAD_MIN << " max " << search::MOVE_OVERHEAD_MAX << std::endl;
+        std::cout << "option name Contempt type spin default 0 min " << search::CONTEMPT_MIN << " max "
+                  << search::CONTEMPT_MAX << std::endl;
+        std::cout << "option name Move Overhead type spin default " << search::MOVE_OVERHEAD_DEFAULT << " min "
+                  << search::MOVE_OVERHEAD_MIN << " max " << search::MOVE_OVERHEAD_MAX << std::endl;
         std::cout << "option name UCI_Chess960 type check default false" << std::endl;
         std::cout << "option name UCI_AnalyseMode type check default false" << std::endl;
         std::cout << "option name UCI_ShowRefutations type check default false" << std::endl;
@@ -355,8 +348,8 @@ namespace
         std::cout << "option name Search Stats type check default false" << std::endl;
         std::cout << "option name Instant Moves type check default true" << std::endl;
         if (nnue::loaded())
-            std::cout << "info string evaluation nnue (" << nnue::file() << ") id " << std::hex
-                      << nnue::hash() << std::dec << std::endl;
+            std::cout << "info string evaluation nnue (" << nnue::file() << ") id " << std::hex << nnue::hash()
+                      << std::dec << std::endl;
         else
             std::cout << "info string evaluation " << evaluate::name() << " ("
                       << (nnue::supported() ? nnue::error() : "NNUE not compiled in") << ")" << std::endl;
@@ -468,9 +461,8 @@ namespace
 
             const auto start = std::chrono::steady_clock::now();
             const uint64_t n = perft::nodes(pos, depth);
-            const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                     std::chrono::steady_clock::now() - start)
-                                     .count();
+            const long long ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
             std::cout << "perft " << depth << " nodes " << n << " time " << ms << " ms";
             if (ms > 0)
                 std::cout << " nps " << (n * 1000 / static_cast<uint64_t>(ms));

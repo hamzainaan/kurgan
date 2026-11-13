@@ -216,17 +216,21 @@ namespace
         int i = 0;
         for (; i + 8 <= nnue::HALF_DIM; i += 8)
         {
-            const __m256i value0 = _mm256_min_epi32(_mm256_max_epi32(
-                _mm256_cvtepi16_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(acc0 + i))), zero), high);
+            const __m256i value0 = _mm256_min_epi32(
+                _mm256_max_epi32(_mm256_cvtepi16_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(acc0 + i))),
+                                 zero),
+                high);
             const __m256i weight0 = _mm256_cvtepi16_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(row + i)));
             const __m256i product0 = _mm256_mullo_epi32(_mm256_mullo_epi32(value0, value0), weight0);
             lo = _mm256_add_epi64(lo, _mm256_cvtepi32_epi64(_mm256_castsi256_si128(product0)));
             hi = _mm256_add_epi64(hi, _mm256_cvtepi32_epi64(_mm256_extracti128_si256(product0, 1)));
 
-            const __m256i value1 = _mm256_min_epi32(_mm256_max_epi32(
-                _mm256_cvtepi16_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(acc1 + i))), zero), high);
-            const __m256i weight1 = _mm256_cvtepi16_epi32(
-                _mm_loadu_si128(reinterpret_cast<const __m128i *>(row + nnue::HALF_DIM + i)));
+            const __m256i value1 = _mm256_min_epi32(
+                _mm256_max_epi32(_mm256_cvtepi16_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(acc1 + i))),
+                                 zero),
+                high);
+            const __m256i weight1 =
+                _mm256_cvtepi16_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(row + nnue::HALF_DIM + i)));
             const __m256i product1 = _mm256_mullo_epi32(_mm256_mullo_epi32(value1, value1), weight1);
             lo = _mm256_add_epi64(lo, _mm256_cvtepi32_epi64(_mm256_castsi256_si128(product1)));
             hi = _mm256_add_epi64(hi, _mm256_cvtepi32_epi64(_mm256_extracti128_si256(product1, 1)));
@@ -238,7 +242,7 @@ namespace
         int64_t total = lanes[0] + lanes[1] + lanes[2] + lanes[3];
         for (; i < nnue::HALF_DIM; ++i)
             total += static_cast<int64_t>(squareOf(acc0[i])) * row[i]
-                   + static_cast<int64_t>(squareOf(acc1[i])) * row[nnue::HALF_DIM + i];
+                     + static_cast<int64_t>(squareOf(acc1[i])) * row[nnue::HALF_DIM + i];
         return total;
     }
 #elif defined(__SSE4_1__)
@@ -251,17 +255,19 @@ namespace
         int i = 0;
         for (; i + 4 <= nnue::HALF_DIM; i += 4)
         {
-            const __m128i value0 = _mm_min_epi32(_mm_max_epi32(
-                _mm_cvtepi16_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i *>(acc0 + i))), zero), high);
+            const __m128i value0 = _mm_min_epi32(
+                _mm_max_epi32(_mm_cvtepi16_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i *>(acc0 + i))), zero),
+                high);
             const __m128i weight0 = _mm_cvtepi16_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i *>(row + i)));
             const __m128i product0 = _mm_mullo_epi32(_mm_mullo_epi32(value0, value0), weight0);
             lo = _mm_add_epi64(lo, _mm_cvtepi32_epi64(product0));
             hi = _mm_add_epi64(hi, _mm_cvtepi32_epi64(_mm_srli_si128(product0, 8)));
 
-            const __m128i value1 = _mm_min_epi32(_mm_max_epi32(
-                _mm_cvtepi16_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i *>(acc1 + i))), zero), high);
-            const __m128i weight1 = _mm_cvtepi16_epi32(
-                _mm_loadl_epi64(reinterpret_cast<const __m128i *>(row + nnue::HALF_DIM + i)));
+            const __m128i value1 = _mm_min_epi32(
+                _mm_max_epi32(_mm_cvtepi16_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i *>(acc1 + i))), zero),
+                high);
+            const __m128i weight1 =
+                _mm_cvtepi16_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i *>(row + nnue::HALF_DIM + i)));
             const __m128i product1 = _mm_mullo_epi32(_mm_mullo_epi32(value1, value1), weight1);
             lo = _mm_add_epi64(lo, _mm_cvtepi32_epi64(product1));
             hi = _mm_add_epi64(hi, _mm_cvtepi32_epi64(_mm_srli_si128(product1, 8)));
@@ -273,7 +279,7 @@ namespace
         int64_t total = lanes[0] + lanes[1];
         for (; i < nnue::HALF_DIM; ++i)
             total += static_cast<int64_t>(squareOf(acc0[i])) * row[i]
-                   + static_cast<int64_t>(squareOf(acc1[i])) * row[nnue::HALF_DIM + i];
+                     + static_cast<int64_t>(squareOf(acc1[i])) * row[nnue::HALF_DIM + i];
         return total;
     }
 #else
@@ -282,7 +288,7 @@ namespace
         int64_t total = 0;
         for (int i = 0; i < nnue::HALF_DIM; ++i)
             total += static_cast<int64_t>(squareOf(acc0[i])) * row[i]
-                   + static_cast<int64_t>(squareOf(acc1[i])) * row[nnue::HALF_DIM + i];
+                     + static_cast<int64_t>(squareOf(acc1[i])) * row[nnue::HALF_DIM + i];
         return total;
     }
 #endif
@@ -383,8 +389,8 @@ namespace
             const Bitboard changed = cache.byPiece[pc] ^ now;
             cache.byPiece[pc] = now;
 
-            const int offset = base + (colorOf(pc) == colour ? 0 : nnue::COLOUR_STRIDE)
-                             + typeOf(pc) * nnue::PIECE_STRIDE;
+            const int offset =
+                base + (colorOf(pc) == colour ? 0 : nnue::COLOUR_STRIDE) + typeOf(pc) * nnue::PIECE_STRIDE;
             for (Bitboard b = changed & now; b; b &= b - 1)
                 adds[addCount++] = offset + (static_cast<int>(lsb(b)) ^ flip);
             for (Bitboard b = changed & ~now; b; b &= b - 1)

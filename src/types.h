@@ -141,20 +141,11 @@ enum Piece : int
     PIECE_NB = 16
 };
 
-constexpr int popCount(Bitboard b)
-{
-    return std::popcount(b);
-}
+constexpr int popCount(Bitboard b) { return std::popcount(b); }
 
-constexpr Square lsb(Bitboard b)
-{
-    return static_cast<Square>(std::countr_zero(b));
-}
+constexpr Square lsb(Bitboard b) { return static_cast<Square>(std::countr_zero(b)); }
 
-constexpr Square msb(Bitboard b)
-{
-    return static_cast<Square>(63 - std::countl_zero(b));
-}
+constexpr Square msb(Bitboard b) { return static_cast<Square>(63 - std::countl_zero(b)); }
 
 // Removes and returns the lowest set square
 inline Square popLsb(Bitboard &b)
@@ -183,15 +174,9 @@ constexpr Square makeSquare(File f, Rank r)
     return static_cast<Square>((static_cast<int>(r) << 3) | static_cast<int>(f));
 }
 
-constexpr File fileOf(Square s)
-{
-    return static_cast<File>(static_cast<int>(s) & 7);
-}
+constexpr File fileOf(Square s) { return static_cast<File>(static_cast<int>(s) & 7); }
 
-constexpr Rank rankOf(Square s)
-{
-    return static_cast<Rank>(static_cast<int>(s) >> 3);
-}
+constexpr Rank rankOf(Square s) { return static_cast<Rank>(static_cast<int>(s) >> 3); }
 
 // Material values in centipawns by piece type.
 constexpr int pieceValue(PieceType pt)

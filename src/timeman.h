@@ -30,7 +30,8 @@ namespace manager
     void rootFailing(bool failing); // Marks whether the root currently fails low
 
     // Checks whether the current iteration should stop.
-    bool shouldStop(const Position &pos, int score, int scoreDrop, int stableIterations, int depth, int64_t lastIterationMs);
+    bool shouldStop(const Position &pos, int score, int scoreDrop, int stableIterations, int depth,
+                    int64_t lastIterationMs);
 
     // Hard deadline the search threads poll
     std::chrono::steady_clock::time_point deadline();

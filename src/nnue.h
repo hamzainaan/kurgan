@@ -29,7 +29,7 @@ namespace nnue
 
     // Byte size of a headerless little-endian int16 Bullet network.
     constexpr size_t NET_SIZE = static_cast<size_t>(INPUT_SIZE) * HALF_DIM * 2 + HALF_DIM * 2
-        + static_cast<size_t>(OUTPUT_BUCKETS) * 2 * HALF_DIM * 2 + OUTPUT_BUCKETS * 2;
+                                + static_cast<size_t>(OUTPUT_BUCKETS) * 2 * HALF_DIM * 2 + OUTPUT_BUCKETS * 2;
 
     // True when the engine was built with NNUE support
     constexpr bool supported()

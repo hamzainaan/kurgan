@@ -1,0 +1,27 @@
+---
+Language: Cpp
+BasedOnStyle: Microsoft
+ColumnLimit: 120
+IndentWidth: 4
+AccessModifierOffset: -4
+TabWidth: 4
+UseTab: Never
+BreakBeforeBraces: Allman
+NamespaceIndentation: All
+IndentCaseLabels: false
+PointerAlignment: Right
+ReferenceAlignment: Pointer
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+BreakBeforeBinaryOperators: NonAssignment
+AlignTrailingComments:
+  Kind: Leave
+ReflowComments: Never
+SortIncludes:
+  Enabled: true
+IncludeBlocks: Preserve
+FixNamespaceComments: false
+Cpp11BracedListStyle: true
+...

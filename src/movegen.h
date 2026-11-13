@@ -26,9 +26,7 @@ struct Move
     uint16_t data;
 
     constexpr Move() = default;
-    constexpr Move(uint16_t d) : data(d)
-    {
-    }
+    constexpr Move(uint16_t d) : data(d) {}
     constexpr Move(Square from, Square to, uint16_t flag = NORMAL)
         : data(static_cast<uint16_t>(static_cast<uint16_t>(from) | (static_cast<uint16_t>(to) << 6) | flag))
     {
@@ -47,10 +45,7 @@ struct Move
 };
 
 // Castling stores the rook origin so a rook right of the king means king side
-constexpr bool isKingSideCastling(Move m)
-{
-    return m.to() > m.from();
-}
+constexpr bool isKingSideCastling(Move m) { return m.to() > m.from(); }
 
 constexpr Square castlingKingTo(Move m)
 {
@@ -63,10 +58,7 @@ constexpr Square castlingRookTo(Move m)
 }
 
 // Returns the square the moving piece lands on
-constexpr Square moveTarget(Move m)
-{
-    return m.isCastling() ? castlingKingTo(m) : m.to();
-}
+constexpr Square moveTarget(Move m) { return m.isCastling() ? castlingKingTo(m) : m.to(); }
 
 // Fixed-capacity stack buffer of generated moves.
 struct MoveList

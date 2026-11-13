@@ -15,12 +15,12 @@ namespace
         const Bitboard whitePawns = ((b >> 7) & ~FILE_A_BB) | ((b >> 9) & ~FILE_H_BB);
         const Bitboard blackPawns = ((b << 9) & ~FILE_A_BB) | ((b << 7) & ~FILE_H_BB);
 
-        return (whitePawns & pos.byColor[WHITE] & pos.byType[PAWN]) |
-               (blackPawns & pos.byColor[BLACK] & pos.byType[PAWN]) |
-               (movegen::attacks(KNIGHT, to, occ) & pos.byType[KNIGHT]) |
-               (movegen::attacks(KING, to, occ) & pos.byType[KING]) |
-               (movegen::attacks(BISHOP, to, occ) & (pos.byType[BISHOP] | pos.byType[QUEEN])) |
-               (movegen::attacks(ROOK, to, occ) & (pos.byType[ROOK] | pos.byType[QUEEN]));
+        return (whitePawns & pos.byColor[WHITE] & pos.byType[PAWN])
+               | (blackPawns & pos.byColor[BLACK] & pos.byType[PAWN])
+               | (movegen::attacks(KNIGHT, to, occ) & pos.byType[KNIGHT])
+               | (movegen::attacks(KING, to, occ) & pos.byType[KING])
+               | (movegen::attacks(BISHOP, to, occ) & (pos.byType[BISHOP] | pos.byType[QUEEN]))
+               | (movegen::attacks(ROOK, to, occ) & (pos.byType[ROOK] | pos.byType[QUEEN]));
     }
 
     // Returns the cheapest piece type among the attackers
@@ -83,11 +83,9 @@ int see::evaluate(const Position &pos, Move m)
 
         // Removing an attacker can reveal a slider behind it.
         if (pt == PAWN || pt == BISHOP || pt == QUEEN)
-            attackers |= movegen::attacks(BISHOP, to, occ) & occ &
-                         (pos.byType[BISHOP] | pos.byType[QUEEN]);
+            attackers |= movegen::attacks(BISHOP, to, occ) & occ & (pos.byType[BISHOP] | pos.byType[QUEEN]);
         if (pt == ROOK || pt == QUEEN)
-            attackers |= movegen::attacks(ROOK, to, occ) & occ &
-                         (pos.byType[ROOK] | pos.byType[QUEEN]);
+            attackers |= movegen::attacks(ROOK, to, occ) & occ & (pos.byType[ROOK] | pos.byType[QUEEN]);
 
         ++d;
         swap[d] = pieceValue(onTo) - swap[d - 1];
