@@ -25,15 +25,9 @@ namespace
 
 namespace instant
 {
-    void setEnabled(bool enabled)
-    {
-        enabledSetting = enabled;
-    }
+    void setEnabled(bool enabled) { enabledSetting = enabled; }
 
-    bool enabled()
-    {
-        return enabledSetting;
-    }
+    bool enabled() { return enabledSetting; }
 
     void classify(const Position &root, Move previousMove, PieceType previousVictim, bool restricted)
     {
@@ -69,10 +63,7 @@ namespace instant
             rootKind = Kind::RECAPTURE;
     }
 
-    Kind kind()
-    {
-        return rootKind;
-    }
+    Kind kind() { return rootKind; }
 
     bool isCandidate(Move m)
     {
