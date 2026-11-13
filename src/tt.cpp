@@ -34,10 +34,7 @@ namespace
     constexpr size_t HASHFULL_CLUSTERS = 250;
     constexpr size_t HUGE_PAGE = 2 * 1024 * 1024;
 
-    uint64_t nextSalt()
-    {
-        return splitMix64(saltState);
-    }
+    uint64_t nextSalt() { return splitMix64(saltState); }
 
     // Allocates zeroed memory aligned for huge pages
     void *allocateZeroed(size_t bytes)
@@ -146,15 +143,9 @@ void tt::clear()
     generation = (generation + CLEAR_GENERATION_STEP) & 63;
 }
 
-bool tt::allocated()
-{
-    return table != nullptr;
-}
+bool tt::allocated() { return table != nullptr; }
 
-void tt::newSearch()
-{
-    generation = (generation + 1) & 63;
-}
+void tt::newSearch() { generation = (generation + 1) & 63; }
 
 void tt::prefetch(uint64_t key)
 {
@@ -209,7 +200,8 @@ void tt::store(uint64_t key, Move move, int score, int depth, int bound, int ply
     {
         if (!e.empty() && e.key == stored)
         {
-            if (!protectedMate(e, stored, bound) && (bound == BOUND_EXACT || depth + 4 > e.depth() || e.age(generation) != 0))
+            if (!protectedMate(e, stored, bound)
+                && (bound == BOUND_EXACT || depth + 4 > e.depth() || e.age(generation) != 0))
                 save(e, stored, move == Move() ? e.move : move, score, depth, bound, ply, eval, pv);
             return;
         }
