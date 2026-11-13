@@ -164,7 +164,8 @@ namespace
     }
 
     // Fills the attack table of every square for each blocker subset
-    void initMagics(Magic *magics, Bitboard *table, [[maybe_unused]] size_t tableSize, const uint64_t *magicNumbers, bool rook)
+    void initMagics(Magic *magics, Bitboard *table, [[maybe_unused]] size_t tableSize, const uint64_t *magicNumbers,
+                    bool rook)
     {
         size_t offset = 0;
         for (int s = 0; s < SQUARE_NB; ++s)
@@ -176,7 +177,8 @@ namespace
             const Bitboard fileBB = FILE_A_BB << f;
             const Bitboard edges = ((RANK_1_BB | RANK_8_BB) & ~rankBB) | ((FILE_A_BB | FILE_H_BB) & ~fileBB);
 
-            const Bitboard mask = (rook ? rookSlow(static_cast<Square>(s), 0) : bishopSlow(static_cast<Square>(s), 0)) & ~edges;
+            const Bitboard mask =
+                (rook ? rookSlow(static_cast<Square>(s), 0) : bishopSlow(static_cast<Square>(s), 0)) & ~edges;
             const int bits = popCount(mask);
 
             magics[s].mask = mask;
@@ -191,7 +193,8 @@ namespace
             {
                 const uint64_t idx = (b * magicNumbers[s]) >> magics[s].shift;
                 assert(idx < blockSize);
-                magics[s].attacks[idx] = rook ? rookSlow(static_cast<Square>(s), b) : bishopSlow(static_cast<Square>(s), b);
+                magics[s].attacks[idx] =
+                    rook ? rookSlow(static_cast<Square>(s), b) : bishopSlow(static_cast<Square>(s), b);
                 b = (b - mask) & mask;
             } while (b);
 
@@ -270,10 +273,7 @@ namespace
     }
 
     // Returns the squares strictly between two squares on the same rank.
-    Bitboard betweenOnRank(Square a, Square b)
-    {
-        return betweenTable[a][b];
-    }
+    Bitboard betweenOnRank(Square a, Square b) { return betweenTable[a][b]; }
 
     // Checks the king against attacks on the occupancy after the move
     bool kingSafeAfter(const Position &pos, Move move, Square ksq)
@@ -290,8 +290,7 @@ namespace
             theirs &= ~capturedBit;
         }
 
-        return !((pawnAttacks[us][ksq] & theirs & pos.byType[PAWN])
-                 | (knightAttacks[ksq] & theirs & pos.byType[KNIGHT])
+        return !((pawnAttacks[us][ksq] & theirs & pos.byType[PAWN]) | (knightAttacks[ksq] & theirs & pos.byType[KNIGHT])
                  | (kingAttacks[ksq] & theirs & pos.byType[KING])
                  | (bishopAttack(ksq, occ) & theirs & (pos.byType[BISHOP] | pos.byType[QUEEN]))
                  | (rookAttack(ksq, occ) & theirs & (pos.byType[ROOK] | pos.byType[QUEEN])));
@@ -346,7 +345,8 @@ namespace
             list.add(Move(static_cast<Square>(to - up), to));
         }
 
-        b = (us == WHITE ? ((pawns & RANK_2_BB) << 16) : ((pawns & RANK_7_BB) >> 16)) & empty & (us == WHITE ? empty << 8 : empty >> 8) & target;
+        b = (us == WHITE ? ((pawns & RANK_2_BB) << 16) : ((pawns & RANK_7_BB) >> 16)) & empty
+            & (us == WHITE ? empty << 8 : empty >> 8) & target;
         while (!tacticalOnly && b)
         {
             const Square to = popLsb(b);
@@ -467,8 +467,7 @@ bool movegen::canCastle(const Position &pos, Move move)
     const Bitboard king = 1ULL << kFrom;
     const Bitboard rook = 1ULL << rFrom;
 
-    if ((occ ^ king ^ rook) &
-        (betweenOnRank(kFrom, kTo) | betweenOnRank(rFrom, rTo) | (1ULL << kTo) | (1ULL << rTo)))
+    if ((occ ^ king ^ rook) & (betweenOnRank(kFrom, kTo) | betweenOnRank(rFrom, rTo) | (1ULL << kTo) | (1ULL << rTo)))
         return false;
 
     const Bitboard kingPath = betweenOnRank(kFrom, kTo) | king;
@@ -491,15 +490,9 @@ void movegen::init()
     initBetween();
 }
 
-Bitboard movegen::attacks(PieceType pt, Square sq, Bitboard occupied)
-{
-    return pieceAttacks(pt, sq, occupied);
-}
+Bitboard movegen::attacks(PieceType pt, Square sq, Bitboard occupied) { return pieceAttacks(pt, sq, occupied); }
 
-Bitboard movegen::pawnAttacksFrom(Color c, Square sq)
-{
-    return pawnAttacks[c][sq];
-}
+Bitboard movegen::pawnAttacksFrom(Color c, Square sq) { return pawnAttacks[c][sq]; }
 
 bool movegen::squareAttacked(const Position &pos, Square sq, Color by)
 {
@@ -594,8 +587,7 @@ movegen::Legality movegen::legality(const Position &pos)
 
     info.checkers = (pawnAttacks[us][ksq] & theirs & pos.byType[PAWN])
                     | (knightAttacks[ksq] & theirs & pos.byType[KNIGHT])
-                    | (kingAttacks[ksq] & theirs & pos.byType[KING])
-                    | (bishopAttack(ksq, occ) & diagonal)
+                    | (kingAttacks[ksq] & theirs & pos.byType[KING]) | (bishopAttack(ksq, occ) & diagonal)
                     | (rookAttack(ksq, occ) & straight);
     return info;
 }
@@ -675,15 +667,9 @@ bool movegen::isPseudoLegal(const Position &pos, Move move)
     return to == from + 2 * up && (startRank & (1ULL << from)) && !(occ & (toBit | (1ULL << (from + up))));
 }
 
-void movegen::setChess960(bool enabled)
-{
-    chess960Mode = enabled;
-}
+void movegen::setChess960(bool enabled) { chess960Mode = enabled; }
 
-bool movegen::chess960()
-{
-    return chess960Mode;
-}
+bool movegen::chess960() { return chess960Mode; }
 
 std::string moveToUci(Move m)
 {
