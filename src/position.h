@@ -6,8 +6,7 @@
 #include <cstdint>
 #include <string>
 
-inline constexpr const char *START_FEN =
-    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+inline constexpr const char *START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 enum CastlingRight : uint8_t
 {
@@ -29,15 +28,9 @@ constexpr uint8_t castlingRight(Color c, CastlingSide s)
     return static_cast<uint8_t>(static_cast<uint8_t>(c == WHITE ? WHITE_OO : BLACK_OO) << s);
 }
 
-constexpr Color colorOf(Piece p)
-{
-    return static_cast<Color>(p >> 3);
-}
+constexpr Color colorOf(Piece p) { return static_cast<Color>(p >> 3); }
 
-constexpr PieceType typeOf(Piece p)
-{
-    return static_cast<PieceType>((p - 1) & 7);
-}
+constexpr PieceType typeOf(Piece p) { return static_cast<PieceType>((p - 1) & 7); }
 
 struct Move;
 
