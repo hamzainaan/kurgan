@@ -103,18 +103,13 @@ namespace
         }
 
         for (const auto &[worker, w] : perWorker)
-            out << "SMP        worker " << worker
-                << "  searches " << w.searches
-                << "  nodes " << w.nodes << " (qsearch " << w.qnodes << ")"
-                << "  seldepth " << w.depth
-                << "  completed depth " << w.completed << "\n";
+            out << "SMP        worker " << worker << "  searches " << w.searches << "  nodes " << w.nodes
+                << " (qsearch " << w.qnodes << ")"
+                << "  seldepth " << w.depth << "  completed depth " << w.completed << "\n";
     }
 }
 
-stats::Tally &stats::current()
-{
-    return tally;
-}
+stats::Tally &stats::current() { return tally; }
 
 void stats::record(int worker, int depth, int completed)
 {
@@ -128,15 +123,9 @@ void stats::clearRecords()
     records.clear();
 }
 
-bool stats::reporting()
-{
-    return reportingEnabled;
-}
+bool stats::reporting() { return reportingEnabled; }
 
-void stats::setReporting(bool value)
-{
-    reportingEnabled = value;
-}
+void stats::setReporting(bool value) { reportingEnabled = value; }
 
 std::string stats::report()
 {
@@ -158,29 +147,27 @@ std::string stats::report()
         << "  searches " << local.size() << "\n";
 
     out.precision(1);
-    out << "TT         probes " << t.ttProbes
-        << "  hits " << t.ttHits << " (" << percent(t.ttHits, t.ttProbes) << "%)"
+    out << "TT         probes " << t.ttProbes << "  hits " << t.ttHits << " (" << percent(t.ttHits, t.ttProbes) << "%)"
         << "  exact " << t.ttExact << " (" << percent(t.ttExact, t.ttProbes) << "%)"
-        << "  cutoffs " << t.ttCutoffs
-        << "  collisions " << t.ttCollisions << " (" << percent(t.ttCollisions, t.ttProbes) << "%)\n";
+        << "  cutoffs " << t.ttCutoffs << "  collisions " << t.ttCollisions << " ("
+        << percent(t.ttCollisions, t.ttProbes) << "%)\n";
 
     const uint64_t stores = t.ttStoresExact + t.ttStoresLower + t.ttStoresUpper;
-    out << "TT store   " << stores
-        << "  exact " << percent(t.ttStoresExact, stores) << "%"
+    out << "TT store   " << stores << "  exact " << percent(t.ttStoresExact, stores) << "%"
         << "  lower " << percent(t.ttStoresLower, stores) << "%"
         << "  upper " << percent(t.ttStoresUpper, stores) << "%\n";
 
-    out << "ordering   list nodes " << t.listNodes
-        << "  cut nodes " << t.cutNodes
-        << "  tt-move cutoffs " << percent(t.ttMoveCutoffs, t.cutNodes) << "%"
+    out << "ordering   list nodes " << t.listNodes << "  cut nodes " << t.cutNodes << "  tt-move cutoffs "
+        << percent(t.ttMoveCutoffs, t.cutNodes) << "%"
         << "  first-move " << percent(t.firstCutoffs, t.cutNodes) << "%"
         << "  first-3 " << percent(t.earlyCutoffs, t.cutNodes) << "%";
     out.precision(2);
-    out << "  avg searched " << (t.listNodes == 0 ? 0.0 : static_cast<double>(t.movesSearched) / static_cast<double>(t.listNodes)) << "\n";
+    out << "  avg searched "
+        << (t.listNodes == 0 ? 0.0 : static_cast<double>(t.movesSearched) / static_cast<double>(t.listNodes)) << "\n";
 
     out.precision(1);
-    out << "LMR        count " << t.lmrCount
-        << "  avg reduction " << (t.lmrCount == 0 ? 0.0 : static_cast<double>(t.lmrReduction) / static_cast<double>(t.lmrCount))
+    out << "LMR        count " << t.lmrCount << "  avg reduction "
+        << (t.lmrCount == 0 ? 0.0 : static_cast<double>(t.lmrReduction) / static_cast<double>(t.lmrCount))
         << "  fail-high " << t.lmrFailHigh << " (" << percent(t.lmrFailHigh, t.lmrCount) << "%)"
         << "  re-search " << t.lmrResearch << " (" << percent(t.lmrResearch, t.lmrCount) << "%)"
         << "  verified " << t.lmrVerified << " (" << percent(t.lmrVerified, t.lmrResearch) << "%)"
@@ -191,24 +178,19 @@ std::string stats::report()
 
     // The last three pruning counters count pruned moves rather than nodes.
     out << "pruning    nmp " << t.nmpCutoffs << " (elig " << t.nmpEligible << ")"
-        << "  rfp " << t.rfpCutoffs
-        << "  razor " << t.razorCutoffs
-        << "  probcut " << t.probcutCutoffs << " (nodes " << t.probcutEligible << ")"
+        << "  rfp " << t.rfpCutoffs << "  razor " << t.razorCutoffs << "  probcut " << t.probcutCutoffs << " (nodes "
+        << t.probcutEligible << ")"
         << "  lmp " << t.lmpPruned << " moves"
         << "  move-futility " << t.futilityPruned << " moves"
         << "  see-quiet " << t.seeQuietPruned << " moves"
         << "\n";
 
-    out << "qsearch    nodes " << t.qnodes
-        << "  see rejects " << t.seeRejects
-        << "  beta cutoffs " << t.qsearchCutoffs
+    out << "qsearch    nodes " << t.qnodes << "  see rejects " << t.seeRejects << "  beta cutoffs " << t.qsearchCutoffs
         << "  stand-pat cutoffs " << t.standPatCutoffs << "\n";
 
     out.unsetf(std::ios::fixed);
-    out << "NNUE       eval calls " << t.evalCalls
-        << "  rebuilds " << t.evalRebuilds
-        << "  cached refills " << t.evalRefills
-        << "  incremental updates " << t.evalUpdates << "\n";
+    out << "NNUE       eval calls " << t.evalCalls << "  rebuilds " << t.evalRebuilds << "  cached refills "
+        << t.evalRefills << "  incremental updates " << t.evalUpdates << "\n";
 
     appendWorkerSummary(out, local);
     return out.str();
