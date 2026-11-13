@@ -101,10 +101,7 @@ namespace
     int observedStable = 0;
     double observedEffort = 0.0;
 
-    double lerp(double from, double to, double t)
-    {
-        return from + (to - from) * std::clamp(t, 0.0, 1.0);
-    }
+    double lerp(double from, double to, double t) { return from + (to - from) * std::clamp(t, 0.0, 1.0); }
 
     void setDeadline(Clock::time_point t)
     {
@@ -125,12 +122,10 @@ namespace
         const double phase = std::clamp((32.0 - pieces) / 20.0, 0.0, 1.0);
         const double stage = 1.0 - 2.0 * (phase < 0.5 ? 0.5 - phase : phase - 0.5);
 
-        const double decided = std::min(1.0, decidedScore / DECIDED_SCORE)
-                               * (1.0 - DECIDED_TENSION_W * rootTension);
+        const double decided = std::min(1.0, decidedScore / DECIDED_SCORE) * (1.0 - DECIDED_TENSION_W * rootTension);
 
         return std::clamp(PRESSURE_W * pressureTerm + SWING_W * swingTerm + INSTABILITY_W * instability
-                              + STAGE_W * stage + TENSION_W * rootTension + DANGER_W * rootDanger
-                              - DECIDED_W * decided,
+                              + STAGE_W * stage + TENSION_W * rootTension + DANGER_W * rootDanger - DECIDED_W * decided,
                           0.0, 1.0);
     }
 
@@ -249,7 +244,8 @@ namespace manager
             const int64_t oppInc = us == WHITE ? limits.binc : limits.winc;
             const int64_t available = std::max<int64_t>(1, myTime - moveOverheadMs);
             const int64_t oppAvailable = std::max<int64_t>(1, oppTime - moveOverheadMs);
-            const int64_t horizon = limits.movestogo > 0 ? std::min<int64_t>(limits.movestogo, HORIZON_MOVES) : HORIZON_MOVES;
+            const int64_t horizon =
+                limits.movestogo > 0 ? std::min<int64_t>(limits.movestogo, HORIZON_MOVES) : HORIZON_MOVES;
 
             int64_t optimum = available / horizon + myInc / 2;
 
@@ -257,8 +253,10 @@ namespace manager
             const double incRelief = std::min(1.0, static_cast<double>(myInc) / BANK_INCREMENT_MS);
             const double bank = 1.0 + (BANK_MAX - 1.0) * bankRoom * incRelief;
 
-            const double myBudget = static_cast<double>(available) + 0.5 * static_cast<double>(myInc) * static_cast<double>(horizon);
-            const double oppBudget = static_cast<double>(oppAvailable) + 0.5 * static_cast<double>(oppInc) * static_cast<double>(horizon);
+            const double myBudget =
+                static_cast<double>(available) + 0.5 * static_cast<double>(myInc) * static_cast<double>(horizon);
+            const double oppBudget =
+                static_cast<double>(oppAvailable) + 0.5 * static_cast<double>(oppInc) * static_cast<double>(horizon);
             const double ratio = myBudget / std::max(1.0, oppBudget);
             const double clockLead = std::clamp(1.0 + CLOCK_LEAD_W * std::log2(ratio), CLOCK_LEAD_MIN, CLOCK_LEAD_MAX);
 
@@ -280,7 +278,8 @@ namespace manager
                 maximum = 1;
 
             const double ceilingScale = lerp(CEILING_SCALE, CEILING_SCALE_LOW, lowClock);
-            int64_t ceiling = std::min(available / CEILING_DIV, static_cast<int64_t>(static_cast<double>(maximum) * ceilingScale));
+            int64_t ceiling =
+                std::min(available / CEILING_DIV, static_cast<int64_t>(static_cast<double>(maximum) * ceilingScale));
 
             if (singleReply)
             {
@@ -306,10 +305,7 @@ namespace manager
         }
     }
 
-    void setMoveOverhead(int ms)
-    {
-        moveOverheadMs = ms;
-    }
+    void setMoveOverhead(int ms) { moveOverheadMs = ms; }
 
     void observe(int score, int scoreDrop, int stableIterations, double bestMoveEffort)
     {
@@ -330,10 +326,12 @@ namespace manager
         const int64_t room = ceilingMs.load(std::memory_order_relaxed) - used;
 
         const double ceilingShare = extendMax.load(std::memory_order_relaxed);
-        const double share = failingLow.load(std::memory_order_relaxed)
-                                 ? ceilingShare
-                                 : lerp(EXTEND_MIN, ceilingShare, (tactical - EXTEND_THRESHOLD) / (1.0 - EXTEND_THRESHOLD));
-        const int64_t step = std::min(room, static_cast<int64_t>(static_cast<double>(maximumMs.load(std::memory_order_relaxed)) * share));
+        const double share =
+            failingLow.load(std::memory_order_relaxed)
+                ? ceilingShare
+                : lerp(EXTEND_MIN, ceilingShare, (tactical - EXTEND_THRESHOLD) / (1.0 - EXTEND_THRESHOLD));
+        const int64_t step = std::min(
+            room, static_cast<int64_t>(static_cast<double>(maximumMs.load(std::memory_order_relaxed)) * share));
         if (step < MIN_EXTENSION_MS)
             return false;
 
@@ -366,15 +364,9 @@ namespace manager
         previousDepth = 0;
     }
 
-    bool budgeted()
-    {
-        return baseOptimumMs.load(std::memory_order_relaxed) > 0;
-    }
+    bool budgeted() { return baseOptimumMs.load(std::memory_order_relaxed) > 0; }
 
-    int64_t optimumMs()
-    {
-        return baseOptimumMs.load(std::memory_order_relaxed);
-    }
+    int64_t optimumMs() { return baseOptimumMs.load(std::memory_order_relaxed); }
 
     int64_t elapsedMs()
     {
@@ -382,18 +374,16 @@ namespace manager
         return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count();
     }
 
-    void rootFailing(bool failing)
-    {
-        failingLow.store(failing, std::memory_order_relaxed);
-    }
+    void rootFailing(bool failing) { failingLow.store(failing, std::memory_order_relaxed); }
 
-    bool shouldStop(const Position &pos, int score, int scoreDrop, int stableIterations, int depth, int64_t lastIterationMs)
+    bool shouldStop(const Position &pos, int score, int scoreDrop, int stableIterations, int depth,
+                    int64_t lastIterationMs)
     {
         const int swing = scoreDrop < 0 ? -scoreDrop : scoreDrop;
 
         // Keep the easy stop depth anchored near the last completed depth.
-        const int stopDepth = std::max(easyStopDepth.load(std::memory_order_relaxed),
-                                       previousDepth - DEPTH_ANCHOR_SLACK);
+        const int stopDepth =
+            std::max(easyStopDepth.load(std::memory_order_relaxed), previousDepth - DEPTH_ANCHOR_SLACK);
 
         double factor = 1.0;
         if (depth >= stopDepth && stableIterations >= EASY_ITERATIONS && swing <= EASY_SWING)
@@ -410,7 +400,9 @@ namespace manager
 
         const double scale = lerp(TIME_SCALE_MIN, TIME_SCALE_MAX, criticality(pos, score, scoreDrop, stableIterations));
         const int64_t maximum = maximumMs.load(std::memory_order_relaxed);
-        const int64_t soft = std::min(maximum, static_cast<int64_t>(static_cast<double>(baseOptimumMs.load(std::memory_order_relaxed)) * scale * factor));
+        const int64_t soft =
+            std::min(maximum, static_cast<int64_t>(static_cast<double>(baseOptimumMs.load(std::memory_order_relaxed))
+                                                   * scale * factor));
 
         const int64_t elapsed = elapsedMs();
         if (elapsed >= soft)
@@ -421,7 +413,8 @@ namespace manager
         if (extensible(tacticality()))
             reach = std::max(reach, ceilingMs.load(std::memory_order_relaxed));
 
-        return static_cast<double>(elapsed) + ITERATION_GROWTH * static_cast<double>(std::max<int64_t>(0, lastIterationMs))
+        return static_cast<double>(elapsed)
+                   + ITERATION_GROWTH * static_cast<double>(std::max<int64_t>(0, lastIterationMs))
                > static_cast<double>(reach);
     }
 
