@@ -1138,7 +1138,7 @@ namespace
         if (!pvNode && !inCheck && !mateWindow && !shallowSearch)
         {
             // Razoring drops into quiescence when the evaluation is far below alpha
-            if (depth <= tuned::RAZOR_DEPTH && eval + tuned::RAZOR_MARGIN * depth < alpha)
+            if (!cutNode && depth <= tuned::RAZOR_DEPTH && eval + tuned::RAZOR_MARGIN * depth < alpha)
             {
                 const int razorScore = quiescence(pos, alpha, beta, ply);
                 if (razorScore <= alpha)
